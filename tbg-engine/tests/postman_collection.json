@@ -1,0 +1,170 @@
+{
+  "info": {
+    "name": "TBG/CMS Engine - Contract & Integration Tests",
+    "description": "Newman-runnable collection validating idempotency, double-entry balance, HMAC signature verification, and lien exhaustion against the TBG/CMS Go engine.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "{{base_url}}" }
+  ],
+  "item": [
+    {
+      "name": "1. Payout - Success (200 + balanced double-entry)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// Compute HMAC-SHA512 signature matching the Go engine's verifySignature():",
+              "// raw = corporate_account|idempotency_key|amount(%f)|salt",
+              "const key = pm.environment.get('MERCHANT_KEY');",
+              "const salt = pm.environment.get('MERCHANT_SALT');",
+              "const corpAccount = pm.environment.get('corporate_account');",
+              "const txnid = 'PM-TEST-' + Date.now();",
+              "const amount = 2500000.00;",
+              "",
+              "pm.collectionVariables.set('current_txnid', txnid);",
+              "pm.collectionVariables.set('current_amount', amount.toFixed(2));",
+              "",
+              "// Go's %f verb defaults to 6 decimal places.",
+              "const amountFmt = amount.toFixed(6);",
+              "const rawString = `${corpAccount}|${txnid}|${amountFmt}|${salt}`;",
+              "const hash = CryptoJS.HmacSHA512(rawString, salt).toString(CryptoJS.enc.Hex);",
+              "pm.collectionVariables.set('calculated_hash', hash);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200', () => {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "",
+              "pm.test('Response is SETTLED with a UTR and Merkle hash', () => {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.status).to.eql('SETTLED');",
+              "    pm.expect(json.utr).to.be.a('string').and.not.empty;",
+              "    pm.expect(json.merkle_hash).to.be.a('string').with.lengthOf(64);",
+              "});",
+              "",
+              "pm.test('Double-entry ledger legs are balanced', () => {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json.ledger_entries).to.be.an('array').with.lengthOf(2);",
+              "    const [debit, credit] = json.ledger_entries;",
+              "    pm.expect(debit.direction).to.eql('DR');",
+              "    pm.expect(credit.direction).to.eql('CR');",
+              "    pm.expect(debit.amount).to.eql(credit.amount);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Idempotency-Key", "value": "{{current_txnid}}" },
+          { "key": "X-Signature", "value": "{{calculated_hash}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"corporate_account\": \"{{corporate_account}}\",\n  \"amount\": {{current_amount}},\n  \"currency\": \"INR\",\n  \"payment_rail\": \"RTGS\",\n  \"beneficiary_name\": \"Larsen and Toubro Limited\",\n  \"beneficiary_acct\": \"98127391827\",\n  \"beneficiary_ifsc\": \"SBIN0000123\",\n  \"reference_id\": \"{{current_txnid}}\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/api/v1/cms/payout", "host": ["{{base_url}}"], "path": ["api", "v1", "cms", "payout"] }
+      }
+    },
+    {
+      "name": "2. Payout - Idempotency Replay (409 Conflict)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Replaying the same Idempotency-Key returns 409 Conflict', () => {",
+              "    pm.response.to.have.status(409);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Idempotency-Key", "value": "{{current_txnid}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"corporate_account\": \"{{corporate_account}}\",\n  \"amount\": {{current_amount}},\n  \"reference_id\": \"{{current_txnid}}\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/api/v1/cms/payout", "host": ["{{base_url}}"], "path": ["api", "v1", "cms", "payout"] },
+        "description": "Runs the request from item 1 again with the same Idempotency-Key. Requires item 1 to have run first in the same collection run so current_txnid is populated."
+      }
+    },
+    {
+      "name": "3. Payout - Insufficient Liquidity (422 Unprocessable)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.collectionVariables.set('overdraft_txnid', 'PM-OVERDRAFT-' + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Requesting more than available liquidity returns 422', () => {",
+              "    pm.response.to.have.status(422);",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Idempotency-Key", "value": "{{overdraft_txnid}}" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"corporate_account\": \"{{corporate_account}}\",\n  \"amount\": 999999999999.00,\n  \"reference_id\": \"{{overdraft_txnid}}\"\n}"
+        },
+        "url": { "raw": "{{base_url}}/api/v1/cms/payout", "host": ["{{base_url}}"], "path": ["api", "v1", "cms", "payout"] }
+      }
+    },
+    {
+      "name": "4. Stats - Recent Postings & Suspense Balance",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('Status code is 200', () => { pm.response.to.have.status(200); });",
+              "pm.test('Response includes postings array and suspense_balance', () => {",
+              "    const json = pm.response.json();",
+              "    pm.expect(json).to.have.property('postings');",
+              "    pm.expect(json).to.have.property('suspense_balance');",
+              "});"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/api/v1/cms/stats", "host": ["{{base_url}}"], "path": ["api", "v1", "cms", "stats"] }
+      }
+    }
+  ]
+}
