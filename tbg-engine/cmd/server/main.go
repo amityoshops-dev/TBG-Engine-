@@ -21,6 +21,7 @@ import (
 
 func main() {
 	cfg := config.Load()
+	log.Printf("DEBUG REDIS_URL set=%v length=%d", cfg.RedisURL != "", len(cfg.RedisURL))
 	logger := observability.New()
 
 	db, err := sql.Open("postgres", cfg.PostgresDSN)
