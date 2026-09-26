@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,161 +15,150 @@ import (
 
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
-
-	"tbg-engine/internal/config"
-	"tbg-engine/internal/ledger"
-	"tbg-engine/internal/observability"
-	"tbg-engine/internal/service"
 )
 
+type App struct {
+	DB    *sql.DB
+	Redis *redis.Client
+}
+
 func main() {
-	// 1. Load configuration
-	cfg := config.Load()
+	log.Println("Starting TBG-Engine service...")
 
-	// DEBUG: confirms exactly what REDIS_URL looks like at runtime, without
-	// leaking the password, so we can tell a missing "s" (rediss://) or a
-	// genuine connectivity issue apart from a config problem.
-	// Safe to delete once the Redis connection issue is resolved.
-	scheme := "unknown"
-	if len(cfg.RedisURL) >= 8 {
-		scheme = cfg.RedisURL[:8]
-	}
-	log.Printf("DEBUG REDIS_URL scheme_prefix=%q total_length=%d", scheme, len(cfg.RedisURL))
-
-	logger := observability.New()
-
-	// 2. Connect to PostgreSQL
-	db, err := sql.Open("postgres", cfg.PostgresDSN)
-	if err != nil {
-		log.Fatalf("postgres connection error: %v", err)
-	}
+	// 1. Initialize PostgreSQL
+	db := initPostgres()
 	defer db.Close()
 
-	db.SetMaxOpenConns(50)
-	db.SetMaxIdleConns(10)
-	db.SetConnMaxLifetime(30 * time.Minute)
+	// 2. Initialize Redis
+	rdb := initRedis()
+	defer rdb.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	app := &App{
+		DB:    db,
+		Redis: rdb,
+	}
+
+	// 3. HTTP Server Setup
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", app.healthHandler)
+	mux.HandleFunc("/", app.rootHandler)
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	server := &http.Server{
+		Addr:         ":" + port,
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// 4. Graceful Shutdown Listener
+	stopChan := make(chan os.Signal, 1)
+	signal.Notify(stopChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		log.Printf("Server listening on port %s", port)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	<-stopChan
+	log.Println("Shutting down server gracefully...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Forced shutdown error: %v", err)
+	}
+
+	log.Println("TBG-Engine stopped cleanly.")
+}
+
+func initPostgres() *sql.DB {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		log.Fatal("DATABASE_URL environment variable is missing")
+	}
+
+	db, err := sql.Open("postgres", dbURL)
+	if err != nil {
+		log.Fatalf("PostgreSQL connection configuration error: %v", err)
+	}
+
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
-		log.Fatalf("postgres ping failed: %v", err)
+		log.Fatalf("PostgreSQL ping failed: %v", err)
 	}
 
 	log.Println("PostgreSQL connected successfully")
+	return db
+}
 
-	// 3. Configure Redis using Render environment variables
-	rawRedisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
-
-	if rawRedisURL == "" {
-		rawRedisURL = strings.TrimSpace(os.Getenv("REDIS_ADDR"))
+func initRedis() *redis.Client {
+	redisURL := os.Getenv("REDIS_URL")
+	if redisURL == "" {
+		log.Fatal("REDIS_URL environment variable is missing")
 	}
 
-	if rawRedisURL == "" {
-		log.Fatal("Redis configuration missing: set REDIS_URL or REDIS_ADDR")
+	opt, err := redis.ParseURL(redisURL)
+	if err != nil {
+		log.Fatalf("Invalid REDIS_URL format: %v", err)
 	}
 
-	var redisOpt *redis.Options
-
-	if strings.HasPrefix(rawRedisURL, "redis://") || strings.HasPrefix(rawRedisURL, "rediss://") {
-		redisOpt, err = redis.ParseURL(rawRedisURL)
-		if err != nil {
-			log.Fatalf("failed to parse Redis URL: %v", err)
+	// Fix for the EOF issue on Render:
+	// If the URL starts with rediss:// (TLS) or the host is an external render URL
+	if strings.HasPrefix(redisURL, "rediss://") || opt.TLSConfig != nil {
+		if opt.TLSConfig == nil {
+			opt.TLSConfig = &tls.Config{}
 		}
-	} else {
-		// Supports bare host:port Redis addresses (e.g. local docker-compose
-		// without a scheme).
-		redisOpt = &redis.Options{
-			Addr: rawRedisURL,
-		}
+		// Allows connection to self-signed or proxy TLS terminations
+		opt.TLSConfig.InsecureSkipVerify = true
 	}
 
-	// Enable TLS for rediss:// managed Redis connections (Upstash and most
-	// managed providers require this).
-	if strings.HasPrefix(rawRedisURL, "rediss://") {
-		redisOpt.TLSConfig = &tls.Config{
-			MinVersion: tls.VersionTLS12,
-		}
-	}
+	client := redis.NewClient(opt)
 
-	// Create exactly ONE Redis client
-	rdb := redis.NewClient(redisOpt)
-	defer rdb.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	redisCtx, redisCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer redisCancel()
-
-	if err := rdb.Ping(redisCtx).Err(); err != nil {
+	if err := client.Ping(ctx).Err(); err != nil {
 		log.Fatalf("redis connection error: %v", err)
 	}
 
 	log.Println("Redis connected successfully")
+	return client
+}
 
-	// 4. Initialize application services
-	repo := ledger.NewRepository(db)
-	lienEngine := ledger.NewLienEngine(rdb)
+func (a *App) healthHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
 
-	payoutSvc := service.NewPayoutService(repo, lienEngine, rdb, logger, cfg.HMACSalt)
-	eodSvc := service.NewEODReconciler(repo, logger)
-
-	// Reserved for scheduled EOD reconciliation.
-	// Connect to a cron scheduler when implementing automation.
-	_ = eodSvc
-
-	// 5. Register HTTP routes
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/cms/payout", payoutSvc.HandlePayout)
-	mux.HandleFunc("/api/v1/cms/stats", payoutSvc.HandleStats)
-	mux.HandleFunc("/healthz", payoutSvc.HandleHealthz)
-
-	// 6. Configure the HTTP server
-	addr := strings.TrimSpace(os.Getenv("PORT"))
-
-	if addr == "" {
-		addr = strings.TrimSpace(cfg.ListenAddr)
+	if err := a.DB.PingContext(ctx); err != nil {
+		http.Error(w, "Database unavailable", http.StatusServiceUnavailable)
+		return
 	}
 
-	if addr == "" {
-		addr = "8080"
+	if err := a.Redis.Ping(ctx).Err(); err != nil {
+		http.Error(w, "Redis unavailable", http.StatusServiceUnavailable)
+		return
 	}
 
-	// Render provides PORT as a bare numeric value (e.g. "10000").
-	// Convert it into a valid TCP listen address (":10000") if needed.
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		addr = ":" + strings.TrimPrefix(addr, ":")
-	}
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintln(w, "OK")
+}
 
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-
-	// 7. Start HTTP server
-	go func() {
-		log.Printf("TBG-CORE API starting on %s", addr)
-
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
-		}
-	}()
-
-	// 8. Graceful shutdown
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-
-	log.Println("Shutting down gracefully...")
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("graceful shutdown error: %v", err)
-	}
-
-	log.Println("Server stopped")
+func (a *App) rootHandler(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	_, _ = fmt.Fprintln(w, "TBG-Engine is active")
 }
