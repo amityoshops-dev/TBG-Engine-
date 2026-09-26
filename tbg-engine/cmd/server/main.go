@@ -22,18 +22,9 @@ import (
 	"tbg-engine/internal/service"
 )
 
-	func main() {
+func main() {
 	// 1. Load configuration
 	cfg := config.Load()
-
-	logger := observability.New()
-	...
-	scheme := "unknown"
-if len(cfg.RedisURL) >= 8 {
-    scheme = cfg.RedisURL[:8]
-}
-log.Printf("DEBUG REDIS_URL scheme_prefix=%q total_length=%d", scheme, len(cfg.RedisURL))
-	
 
 	logger := observability.New()
 
