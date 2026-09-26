@@ -73,7 +73,7 @@ func main() {
 	}
 
 	if rawRedisURL == "" {
-		log.Fatal("Redis configuration missing: set REDIS_URL or REDIS_ADDR")
+		log.Fatal("Redis configuration: set REDIS_URL or REDIS_ADDR")
 	}
 
 	var redisOpt *redis.Options
@@ -83,7 +83,7 @@ func main() {
 
 		redisOpt, err = redis.ParseURL(rawRedisURL)
 		if err != nil {
-			log.Fatalf("failed to parse Redis URL: %v", err)
+			log.Fatalf("parse Redis URL: %v", err)
 		}
 
 	} else {
@@ -111,7 +111,7 @@ func main() {
 	defer redisCancel()
 
 	if err := rdb.Ping(redisCtx).Err(); err != nil {
-		log.Fatalf("redis connection error: %v", err)
+		log.Fatalf("redis connection: %v", err)
 	}
 
 	log.Println("Redis connected successfully")
