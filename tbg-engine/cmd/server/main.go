@@ -1,4 +1,3 @@
-
 package main
 
 import (
@@ -26,10 +25,11 @@ import (
 func main() {
 	// 1. Load configuration
 	cfg := config.Load()
-		// DEBUG: confirms exactly what REDIS_URL looks like at runtime,
-	// without leaking the password, so we can tell a missing "s" (rediss://)
-	// or a genuine connectivity issue.
-	// Safe to delete once the Redis EOF error is resolved.
+
+	// DEBUG: confirms exactly what REDIS_URL looks like at runtime, without
+	// leaking the password, so we can tell a missing "s" (rediss://) or a
+	// genuine connectivity issue apart from a config problem.
+	// Safe to delete once the Redis connection issue is resolved.
 	scheme := "unknown"
 	if len(cfg.RedisURL) >= 8 {
 		scheme = cfg.RedisURL[:8]
@@ -49,10 +49,7 @@ func main() {
 	db.SetMaxIdleConns(10)
 	db.SetConnMaxLifetime(30 * time.Minute)
 
-	ctx, cancel := context.WithTimeout(
-		context.Background(),
-		10*time.Second,
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
@@ -69,31 +66,26 @@ func main() {
 	}
 
 	if rawRedisURL == "" {
-		rawRedisURL = strings.TrimSpace(cfg.RedisAddr)
-	}
-
-	if rawRedisURL == "" {
-		log.Fatal("Redis configuration: set REDIS_URL or REDIS_ADDR")
+		log.Fatal("Redis configuration missing: set REDIS_URL or REDIS_ADDR")
 	}
 
 	var redisOpt *redis.Options
 
-	if strings.HasPrefix(rawRedisURL, "redis://") ||
-		strings.HasPrefix(rawRedisURL, "rediss://") {
-
+	if strings.HasPrefix(rawRedisURL, "redis://") || strings.HasPrefix(rawRedisURL, "rediss://") {
 		redisOpt, err = redis.ParseURL(rawRedisURL)
 		if err != nil {
-			log.Fatalf("parse Redis URL: %v", err)
+			log.Fatalf("failed to parse Redis URL: %v", err)
 		}
-
 	} else {
-		// Supports host:port Redis addresses
+		// Supports bare host:port Redis addresses (e.g. local docker-compose
+		// without a scheme).
 		redisOpt = &redis.Options{
 			Addr: rawRedisURL,
 		}
 	}
 
-	// Enable TLS for rediss:// managed Redis connections
+	// Enable TLS for rediss:// managed Redis connections (Upstash and most
+	// managed providers require this).
 	if strings.HasPrefix(rawRedisURL, "rediss://") {
 		redisOpt.TLSConfig = &tls.Config{
 			MinVersion: tls.VersionTLS12,
@@ -104,31 +96,20 @@ func main() {
 	rdb := redis.NewClient(redisOpt)
 	defer rdb.Close()
 
-	redisCtx, redisCancel := context.WithTimeout(
-		context.Background(),
-		10*time.Second,
-	)
+	redisCtx, redisCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer redisCancel()
 
 	if err := rdb.Ping(redisCtx).Err(); err != nil {
-		log.Fatalf("redis connection: %v", err)
+		log.Fatalf("redis connection error: %v", err)
 	}
 
 	log.Println("Redis connected successfully")
 
 	// 4. Initialize application services
 	repo := ledger.NewRepository(db)
-
 	lienEngine := ledger.NewLienEngine(rdb)
 
-	payoutSvc := service.NewPayoutService(
-		repo,
-		lienEngine,
-		rdb,
-		logger,
-		cfg.HMACSalt,
-	)
-
+	payoutSvc := service.NewPayoutService(repo, lienEngine, rdb, logger, cfg.HMACSalt)
 	eodSvc := service.NewEODReconciler(repo, logger)
 
 	// Reserved for scheduled EOD reconciliation.
@@ -137,21 +118,9 @@ func main() {
 
 	// 5. Register HTTP routes
 	mux := http.NewServeMux()
-
-	mux.HandleFunc(
-		"/api/v1/cms/payout",
-		payoutSvc.HandlePayout,
-	)
-
-	mux.HandleFunc(
-		"/api/v1/cms/stats",
-		payoutSvc.HandleStats,
-	)
-
-	mux.HandleFunc(
-		"/healthz",
-		payoutSvc.HandleHealthz,
-	)
+	mux.HandleFunc("/api/v1/cms/payout", payoutSvc.HandlePayout)
+	mux.HandleFunc("/api/v1/cms/stats", payoutSvc.HandleStats)
+	mux.HandleFunc("/healthz", payoutSvc.HandleHealthz)
 
 	// 6. Configure the HTTP server
 	addr := strings.TrimSpace(os.Getenv("PORT"))
@@ -164,8 +133,8 @@ func main() {
 		addr = "8080"
 	}
 
-	// Render provides PORT as a numeric value.
-	// Convert it into a valid TCP listen address.
+	// Render provides PORT as a bare numeric value (e.g. "10000").
+	// Convert it into a valid TCP listen address (":10000") if needed.
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		addr = ":" + strings.TrimPrefix(addr, ":")
 	}
@@ -183,29 +152,19 @@ func main() {
 	go func() {
 		log.Printf("TBG-CORE API starting on %s", addr)
 
-		if err := srv.ListenAndServe(); err != nil &&
-			err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}
 	}()
 
 	// 8. Graceful shutdown
 	stop := make(chan os.Signal, 1)
-
-	signal.Notify(
-		stop,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-	)
-
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
 	log.Println("Shutting down gracefully...")
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(
-		context.Background(),
-		10*time.Second,
-	)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
