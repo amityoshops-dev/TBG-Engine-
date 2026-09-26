@@ -26,6 +26,15 @@ import (
 func main() {
 	// 1. Load configuration
 	cfg := config.Load()
+		// DEBUG: confirms exactly what REDIS_URL looks like at runtime,
+	// without leaking the password, so we can tell a missing "s" (rediss://)
+	// or a genuine connectivity issue.
+	// Safe to delete once the Redis EOF error is resolved.
+	scheme := "unknown"
+	if len(cfg.RedisURL) >= 8 {
+		scheme = cfg.RedisURL[:8]
+	}
+	log.Printf("DEBUG REDIS_URL scheme_prefix=%q total_length=%d", scheme, len(cfg.RedisURL))
 
 	logger := observability.New()
 
