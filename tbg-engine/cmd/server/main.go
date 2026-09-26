@@ -9,6 +9,10 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"crypto/tls"
+	"log"
+	"os"
+	"strings"
 
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
@@ -63,7 +67,39 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("TBG/CMS banking engine listening on %s", cfg.ListenAddr)
+		// 1. Read directly from environment variable (falls back to cfg.RedisAddr if not set)
+	rawRedisURL := os.Getenv("REDIS_URL")
+	if rawRedisURL == "" {
+		rawRedisURL = os.Getenv("REDIS_ADDR")
+	}
+	if rawRedisURL == "" {
+		rawRedisURL = cfg.RedisAddr
+	}
+
+	log.Printf("DEBUG REDIS_URL present=%v length=%d", rawRedisURL != "", len(rawRedisURL))
+
+	// 2. Parse URL and handle rediss:// (TLS) automatically for managed providers
+	var redisOpt *redis.Options
+	if strings.HasPrefix(rawRedisURL, "redis://") || strings.HasPrefix(rawRedisURL, "rediss://") {
+		var err error
+		redisOpt, err = redis.ParseURL(rawRedisURL)
+		if err != nil {
+			log.Fatalf("failed to parse REDIS_URL: %v", err)
+		}
+	} else {
+		redisOpt = &redis.Options{
+			Addr: rawRedisURL,
+		}
+	}
+
+	// Enable TLS if rediss:// scheme is used (required for Upstash / Render managed Redis)
+	if strings.HasPrefix(rawRedisURL, "rediss://") {
+		redisOpt.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+	}
+
+	rdb := redis.NewClient(redisOpt)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}
