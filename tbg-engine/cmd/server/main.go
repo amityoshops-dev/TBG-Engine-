@@ -22,7 +22,12 @@ import (
 	"tbg-engine/internal/service"
 )
 
-func main() {
+	func main() {
+	// 1. Load configuration
+	cfg := config.Load()
+
+	logger := observability.New()
+	...
 	scheme := "unknown"
 if len(cfg.RedisURL) >= 8 {
     scheme = cfg.RedisURL[:8]
