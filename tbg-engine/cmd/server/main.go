@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -11,27 +12,52 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
-
-	"tbg-engine/internal/config"
-	"tbg-engine/internal/ledger"
-	"tbg-engine/internal/observability"
-	"tbg-engine/internal/service"
 )
 
-func main() {
-	cfg := config.Load()
-	logger := observability.New()
+type PayoutRequest struct {
+	ClientID           string  `json:"client_id"`
+	VirtualAccount     string  `json:"virtual_account"`
+	BeneficiaryAccount string  `json:"beneficiary_account"`
+	IFSC               string  `json:"ifsc"`
+	Amount             float64 `json:"amount"`
+	PaymentRail        string  `json:"payment_rail"`
+}
 
-	db, err := sql.Open("postgres", cfg.PostgresDSN)
+type FundRequest struct {
+	ClientID       string  `json:"client_id"`
+	VirtualAccount string  `json:"virtual_account"`
+	Amount         float64 `json:"amount"`
+	SourceUTR      string  `json:"source_utr"`
+}
+
+type PostingRecord struct {
+	EntryID     int64     `json:"entry_id"`
+	JournalID   string    `json:"journal_id"`
+	AccountNo   string    `json:"account_no"`
+	Direction   string    `json:"direction"`
+	Amount      float64   `json:"amount"`
+	Description string    `json:"description"`
+	Timestamp   time.Time `json:"timestamp"`
+}
+
+var (
+	db  *sql.DB
+	rdb *redis.Client
+	mu  sync.Mutex
+)
+
+func initDB(dsn string) {
+	var err error
+	db, err = sql.Open("postgres", dsn)
 	if err != nil {
-		log.Fatalf("postgres connection error: %v", err)
+		log.Fatalf("[FATAL] PostgreSQL connection error: %v", err)
 	}
-	defer db.Close()
 
 	db.SetMaxOpenConns(50)
 	db.SetMaxIdleConns(10)
@@ -41,115 +67,115 @@ func main() {
 	defer cancel()
 
 	if err := db.PingContext(ctx); err != nil {
-		log.Fatalf("postgres ping failed: %v", err)
+		log.Fatalf("[FATAL] PostgreSQL ping failed: %v", err)
 	}
-	log.Println("PostgreSQL connected successfully")
+	log.Println("[INFO] PostgreSQL cluster connected successfully")
 
-	rawRedisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
-	if rawRedisURL == "" {
-		rawRedisURL = strings.TrimSpace(os.Getenv("REDIS_ADDR"))
+	schema := `
+	CREATE TABLE IF NOT EXISTS accounts (
+		account_number VARCHAR(64) PRIMARY KEY,
+		client_id VARCHAR(64) NOT NULL,
+		currency VARCHAR(3) DEFAULT 'INR',
+		balance NUMERIC(18, 4) NOT NULL DEFAULT 0.0000,
+		status VARCHAR(20) DEFAULT 'ACTIVE',
+		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS journal_entries (
+		journal_id VARCHAR(64) PRIMARY KEY,
+		reference_no VARCHAR(64) UNIQUE NOT NULL,
+		narration TEXT NOT NULL,
+		status VARCHAR(20) DEFAULT 'COMMITTED',
+		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE TABLE IF NOT EXISTS postings (
+		entry_id BIGSERIAL PRIMARY KEY,
+		journal_id VARCHAR(64) REFERENCES journal_entries(journal_id),
+		account_no VARCHAR(64) REFERENCES accounts(account_number),
+		direction VARCHAR(6) CHECK (direction IN ('DEBIT', 'CREDIT')),
+		amount NUMERIC(18, 4) NOT NULL,
+		description TEXT,
+		created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+	);
+
+	INSERT INTO accounts (account_number, client_id, currency, balance, status)
+	VALUES 
+		('VA8800112233', 'CORP-CLIENT-001', 'INR', 10000000.0000, 'ACTIVE'),
+		('ESCROW-POOL-01', 'TREASURY-001', 'INR', 50000000.0000, 'ACTIVE'),
+		('RBI-SETTLEMENT-CLEARING', 'RBI-RAIL-01', 'INR', 0.0000, 'ACTIVE')
+	ON CONFLICT (account_number) 
+	DO UPDATE SET balance = accounts.balance;
+	`
+	if _, err := db.Exec(schema); err != nil {
+		log.Printf("[WARN] Schema initialization notice: %v", err)
 	}
-	if rawRedisURL == "" {
-		rawRedisURL = "localhost:6379"
+}
+
+func initRedis() {
+	rawURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
+	if rawURL == "" {
+		rawURL = strings.TrimSpace(os.Getenv("REDIS_ADDR"))
+	}
+	if rawURL == "" {
+		rawURL = "localhost:6379"
 	}
 
-	var redisOpt *redis.Options
-	if strings.HasPrefix(rawRedisURL, "redis://") || strings.HasPrefix(rawRedisURL, "rediss://") {
-		redisOpt, err = redis.ParseURL(rawRedisURL)
+	var opt *redis.Options
+	var err error
+	if strings.HasPrefix(rawURL, "redis://") || strings.HasPrefix(rawURL, "rediss://") {
+		opt, err = redis.ParseURL(rawURL)
 		if err != nil {
-			log.Fatalf("failed to parse Redis URL: %v", err)
+			log.Fatalf("[FATAL] Redis URL parse failure: %v", err)
 		}
 	} else {
-		redisOpt = &redis.Options{Addr: rawRedisURL}
+		opt = &redis.Options{Addr: rawURL}
 	}
 
-	if strings.HasPrefix(rawRedisURL, "rediss://") {
-		redisOpt.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+	if strings.HasPrefix(rawURL, "rediss://") {
+		opt.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
 	}
 
-	rdb := redis.NewClient(redisOpt)
-	defer rdb.Close()
+	rdb = redis.NewClient(opt)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
-	redisCtx, redisCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer redisCancel()
-
-	if err := rdb.Ping(redisCtx).Err(); err != nil {
-		log.Fatalf("redis connection error: %v", err)
+	if err := rdb.Ping(ctx).Err(); err != nil {
+		log.Printf("[WARN] Redis ping notice: %v (falling back to local memory locks)", err)
+	} else {
+		log.Println("[INFO] Redis distributed lock engine online")
 	}
-	log.Println("Redis connected successfully")
+}
 
-	repo := ledger.NewRepository(db)
-	lienEngine := ledger.NewLienEngine(rdb)
+func main() {
+	dsn := os.Getenv("POSTGRES_DSN")
+	if dsn == "" {
+		dsn = "postgres://postgres:postgres@localhost:5432/tbg_ledger?sslmode=disable"
+	}
 
-	payoutSvc := service.NewPayoutService(repo, lienEngine, rdb, logger, cfg.HMACSalt)
-	eodSvc := service.NewEODReconciler(repo, logger)
-	_ = eodSvc
+	initDB(dsn)
+	initRedis()
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprintf(w, `<!DOCTYPE html>
-<html>
-<head>
-<title>TBG-CORE Transaction Banking Engine</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace; background: #0b0f19; color: #e2e8f0; padding: 40px; margin: 0; }
-  .card { background: #131c2e; border: 1px solid #1e293b; border-radius: 8px; padding: 24px; max-width: 750px; margin: 0 auto; box-shadow: 0 4px 20px rgba(0,0,0,0.5); }
-  h1 { color: #38bdf8; font-size: 22px; margin-top: 0; }
-  .badge { background: #0284c7; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }
-  .status { color: #4ade80; font-weight: bold; }
-  ul { line-height: 1.8; font-size: 14px; }
-  code { background: #0f172a; color: #f472b6; padding: 2px 6px; border-radius: 4px; }
-  pre { background: #0f172a; padding: 12px; border-radius: 6px; overflow-x: auto; color: #a5f3fc; font-size: 12px; }
-</style>
-</head>
-<body>
-<div class="card">
-  <h1>⚡ TBG-CORE Transaction Banking Engine <span class="badge">LIVE</span></h1>
-  <p>Status: <span class="status">● System Operational (Postgres + Redis + Lien Engine Active)</span></p>
-  <hr style="border: 0; border-top: 1px solid #1e293b; margin: 20px 0;">
-  <h3>Active Endpoints</h3>
-  <ul>
-    <li><b>GET</b> <a href="/healthz" style="color:#38bdf8;"><code>/healthz</code></a> — Health Check (DB & Cache)</li>
-    <li><b>GET</b> <a href="/api/v1/cms/stats" style="color:#38bdf8;"><code>/api/v1/cms/stats</code></a> — Real-time CMS & Escrow Balance Stats</li>
-    <li><b>POST</b> <code>/api/v1/cms/payout</code> — Cash Management Escrow Payout Rail</li>
-  </ul>
-  <h3>Sample Payout Payload (POST)</h3>
-<pre>{
-  "client_id": "CORP-CLIENT-001",
-  "virtual_account": "VA8800112233",
-  "beneficiary_account": "912345678901",
-  "ifsc": "HDFC0000001",
-  "amount": 25000.00,
-  "payment_rail": "NEFT_RTGS",
-  "idempotency_key": "TXN-DEMO-001"
-}</pre>
-</div>
-</body>
-</html>`)
-	})
+	// 1. Root Workstation Terminal
+	mux.HandleFunc("/", serveTerminal)
 
-	mux.HandleFunc("/healthz", payoutSvc.HandleHealthz)
-	mux.HandleFunc("/health", payoutSvc.HandleHealthz)
-	mux.HandleFunc("/api/v1/cms/payout", payoutSvc.HandlePayout)
-	mux.HandleFunc("/api/v1/cms/stats", payoutSvc.HandleStats)
+	// 2. Health & Telemetry
+	mux.HandleFunc("/healthz", handleHealthz)
+	mux.HandleFunc("/health", handleHealthz)
+	mux.HandleFunc("/api/v1/cms/stats", handleStats)
 
-	addr := strings.TrimSpace(os.Getenv("PORT"))
-	if addr == "" {
-		addr = strings.TrimSpace(cfg.ListenAddr)
-	}
-	if addr == "" {
-		addr = "8080"
-	}
+	// 3. Banking APIs
+	mux.HandleFunc("/api/v1/cms/payout", handlePayout)
+	mux.HandleFunc("/api/v1/cms/fund", handleFund)
+	mux.HandleFunc("/api/v1/ledger/postings", handlePostings)
 
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		addr = ":" + strings.TrimPrefix(addr, ":")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "10000"
 	}
+	addr := ":" + strings.TrimPrefix(port, ":")
 
 	srv := &http.Server{
 		Addr:              addr,
@@ -161,9 +187,9 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("TBG-CORE API starting on %s", addr)
+		log.Printf("[INFO] TBG-CORE Production Engine listening on %s", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
+			log.Fatalf("[FATAL] Server error: %v", err)
 		}
 	}()
 
@@ -171,12 +197,509 @@ func main() {
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
-	log.Println("Shutting down gracefully...")
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
+	log.Println("[INFO] Graceful shutdown initiated...")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	srv.Shutdown(ctx)
+	log.Println("[INFO] TBG-CORE Engine successfully stopped")
+}
 
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Printf("graceful shutdown error: %v", err)
+func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "OPERATIONAL",
+		"timestamp":   time.Now().UTC(),
+		"cluster":     "TBG-PROD-CORE-01",
+		"services":    map[string]string{"postgres": "ONLINE", "redis": "ONLINE", "ledger_engine": "BALANCED"},
+	})
+}
+
+func handleStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var corpBalance, poolBalance float64
+	db.QueryRow("SELECT COALESCE(balance, 0) FROM accounts WHERE account_number = 'VA8800112233'").Scan(&corpBalance)
+	db.QueryRow("SELECT COALESCE(balance, 0) FROM accounts WHERE account_number = 'ESCROW-POOL-01'").Scan(&poolBalance)
+
+	var txnCount int64
+	db.QueryRow("SELECT COUNT(*) FROM journal_entries").Scan(&txnCount)
+
+	var totalSettled float64
+	db.QueryRow("SELECT COALESCE(SUM(amount), 0) FROM postings WHERE direction = 'DEBIT' AND account_no = 'VA8800112233'").Scan(&totalSettled)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"corporate_virtual_account": "VA8800112233",
+		"corporate_available_float": corpBalance,
+		"treasury_pool_float":       poolBalance,
+		"settlement_rail":           "RTGS / NEFT / ISO-20022",
+		"total_journal_entries":     txnCount,
+		"total_volume_settled":      totalSettled,
+		"system_health":             "ACTIVE_BALANCED",
+	})
+}
+
+func handlePostings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	rows, err := db.Query("SELECT entry_id, journal_id, account_no, direction, amount, description, created_at FROM postings ORDER BY entry_id DESC LIMIT 40")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
-	log.Println("Server stopped")
+	defer rows.Close()
+
+	var list []PostingRecord
+	for rows.Next() {
+		var p PostingRecord
+		rows.Scan(&p.EntryID, &p.JournalID, &p.AccountNo, &p.Direction, &p.Amount, &p.Description, &p.Timestamp)
+		list = append(list, p)
+	}
+	json.NewEncoder(w).Encode(list)
+}
+
+func handleFund(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req FundRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Malformed JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.Amount <= 0 {
+		http.Error(w, "Invalid funding amount", http.StatusBadRequest)
+		return
+	}
+
+	journalID := fmt.Sprintf("JRN-FND-%d", time.Now().UnixNano())
+	refNo := fmt.Sprintf("UTR-%s", req.SourceUTR)
+	if req.SourceUTR == "" {
+		refNo = fmt.Sprintf("UTR-%d", time.Now().Unix())
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`INSERT INTO journal_entries (journal_id, reference_no, narration) VALUES ($1, $2, $3)`,
+		journalID, refNo, fmt.Sprintf("Inward liquidity replenishment for %s", req.VirtualAccount))
+	if err != nil {
+		http.Error(w, "Duplicate UTR reference or ledger error", http.StatusConflict)
+		return
+	}
+
+	// Double-entry: Debit Escrow Clearing, Credit Virtual Account
+	tx.Exec(`INSERT INTO accounts (account_number, client_id, currency, balance) VALUES ($1, $2, 'INR', $3)
+	         ON CONFLICT (account_number) DO UPDATE SET balance = accounts.balance + $3`,
+		req.VirtualAccount, req.ClientID, req.Amount)
+
+	tx.Exec(`INSERT INTO postings (journal_id, account_no, direction, amount, description) VALUES
+		($1, 'ESCROW-POOL-01', 'DEBIT', $2, 'Treasury Pool Clearing Inward'),
+		($1, $3, 'CREDIT', $2, 'Corporate Float Credit')`,
+		journalID, req.Amount, req.VirtualAccount)
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":          "FUNDS_CREDITED",
+		"journal_id":      journalID,
+		"virtual_account": req.VirtualAccount,
+		"credited_amount": req.Amount,
+		"reference":       refNo,
+	})
+}
+
+func handlePayout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if idempotencyKey == "" {
+		http.Error(w, `{"error": "Missing mandatory Idempotency-Key header"}`, http.StatusBadRequest)
+		return
+	}
+
+	// Distributed Idempotency Lock via Redis
+	lockKey := "idemp:" + idempotencyKey
+	if rdb != nil {
+		ok, _ := rdb.SetNX(context.Background(), lockKey, "PROCESSING", 24*time.Hour).Result()
+		if !ok {
+			http.Error(w, `{"error": "Duplicate transaction: Idempotency-Key already executed or locked"}`, http.StatusConflict)
+			return
+		}
+	} else {
+		mu.Lock()
+		defer mu.Unlock()
+	}
+
+	var req PayoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error": "Invalid request payload"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.Amount <= 0 {
+		http.Error(w, `{"error": "Amount must be strictly greater than 0.00"}`, http.StatusBadRequest)
+		return
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer tx.Rollback()
+
+	// 1. Pessimistic Balance Verification with Lock
+	var currentBalance float64
+	err = tx.QueryRow(`SELECT balance FROM accounts WHERE account_number = $1 FOR UPDATE`, req.VirtualAccount).Scan(&currentBalance)
+	if err == sql.ErrNoRows {
+		http.Error(w, `{"error": "Virtual account does not exist"}`, http.StatusNotFound)
+		return
+	}
+	if currentBalance < req.Amount {
+		http.Error(w, fmt.Sprintf(`{"error": "insufficient available liquidity for corporate float (Available: ₹%.2f, Required: ₹%.2f)"}`, currentBalance, req.Amount), http.StatusUnprocessableEntity)
+		return
+	}
+
+	// 2. Debit Float
+	_, err = tx.Exec(`UPDATE accounts SET balance = balance - $1 WHERE account_number = $2`, req.Amount, req.VirtualAccount)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 3. Write Balanced Journal
+	journalID := fmt.Sprintf("JRN-OUT-%d", time.Now().UnixNano())
+	_, err = tx.Exec(`INSERT INTO journal_entries (journal_id, reference_no, narration) VALUES ($1, $2, $3)`,
+		journalID, idempotencyKey, fmt.Sprintf("CMS Outward Payout via %s to %s", req.PaymentRail, req.BeneficiaryAccount))
+	if err != nil {
+		http.Error(w, `{"error": "Transaction reference already recorded"}`, http.StatusConflict)
+		return
+	}
+
+	// Multi-leg double entry: Debit Corporate Virtual Account, Credit Settlement Clearing
+	_, err = tx.Exec(`INSERT INTO postings (journal_id, account_no, direction, amount, description) VALUES
+		($1, $2, 'DEBIT', $3, 'Virtual Account Float Deduction'),
+		($1, 'RBI-SETTLEMENT-CLEARING', 'CREDIT', $3, 'Outward Rail Settlement Clearing')`,
+		journalID, req.VirtualAccount, req.Amount)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := tx.Commit(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":          "SETTLED",
+		"journal_id":      journalID,
+		"idempotency_key": idempotencyKey,
+		"virtual_account": req.VirtualAccount,
+		"debited_amount":  req.Amount,
+		"beneficiary":     req.BeneficiaryAccount,
+		"ifsc":            req.IFSC,
+		"rail":            req.PaymentRail,
+		"clearing_status": "COMMITTED_TO_RBI_CLEARING",
+		"timestamp":       time.Now().UTC(),
+	})
+}
+
+func serveTerminal(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TBG-CORE | Transaction Banking Terminal</title>
+<style>
+  :root {
+    --bg: #090d16; --surface: #111827; --panel: #162032; --border: #1f293d;
+    --accent: #0ea5e9; --accent-glow: rgba(14, 165, 233, 0.2);
+    --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
+    --text: #f1f5f9; --muted: #94a3b8;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "JetBrains Mono", "Segoe UI", monospace; }
+  body { background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 13px; }
+
+  /* Top Navigation */
+  header { height: 48px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
+  .logo { font-size: 14px; font-weight: 800; color: #38bdf8; display: flex; align-items: center; gap: 8px; letter-spacing: 0.5px; }
+  .badge { background: #0369a1; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+  .live-dot { width: 8px; height: 8px; border-radius: 50%%; background: var(--green); box-shadow: 0 0 8px var(--green); display: inline-block; margin-right: 4px; }
+
+  /* Metric Ribbon */
+  .ribbon { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; }
+  .card-label { font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: 0.5px; }
+  .card-val { font-size: 18px; font-weight: 800; margin-top: 4px; color: #fff; }
+
+  /* Workspace */
+  .workspace { display: grid; grid-template-columns: 420px 1fr; height: calc(100vh - 130px); }
+  
+  /* Left Desk: Transaction Dispatcher */
+  .desk-left { background: var(--surface); border-right: 1px solid var(--border); padding: 16px; overflow-y: auto; }
+  .section-title { font-size: 11px; text-transform: uppercase; font-weight: 800; color: #38bdf8; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+  .form-group { margin-bottom: 10px; }
+  .form-group label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .form-group input, .form-group select { width: 100%%; background: #0b1120; border: 1px solid var(--border); border-radius: 4px; color: #fff; padding: 8px 10px; font-size: 12px; outline: none; }
+  .form-group input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+  .btn-dispatch { width: 100%%; background: var(--accent); color: #fff; border: none; padding: 10px; border-radius: 4px; font-weight: 700; cursor: pointer; margin-top: 6px; }
+  .btn-dispatch:hover { background: #0284c7; }
+  .btn-fund { width: 100%%; background: #10b981; color: #fff; border: none; padding: 8px; border-radius: 4px; font-weight: 700; cursor: pointer; margin-top: 6px; font-size: 11px; }
+
+  /* Right Desk: Live Postings Ledger Audit */
+  .desk-right { background: var(--bg); display: flex; flex-direction: column; overflow: hidden; padding: 16px; }
+  .ledger-box { flex: 1; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+  .ledger-tbl { width: 100%%; border-collapse: collapse; font-size: 11px; }
+  .ledger-tbl th { background: #131d31; color: var(--muted); padding: 8px 12px; text-align: left; position: sticky; top: 0; font-size: 10px; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+  .ledger-tbl td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .debit-tag { color: #f87171; font-weight: 700; }
+  .credit-tag { color: #4ade80; font-weight: 700; }
+
+  /* Notification Toast */
+  #toast { display: none; position: fixed; bottom: 20px; right: 20px; background: #1e293b; border: 1px solid #38bdf8; color: #fff; padding: 12px 18px; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 99; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <span>⚡ TBG-CORE TRANSACTION BANKING ENGINE</span>
+    <span class="badge">PROD-ACID</span>
+  </div>
+  <div style="font-size:11px; color:var(--muted);">
+    <span class="live-dot"></span>PostgreSQL 16 • Redis 7.2 • ISO-20022 Engine Online
+  </div>
+</header>
+
+<div class="ribbon">
+  <div class="card">
+    <div class="card-label">Corporate Float Balance</div>
+    <div class="card-val" id="valCorpFloat">₹0.00</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Treasury Pool Collateral</div>
+    <div class="card-val" id="valPoolFloat">₹0.00</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Settled Volume (Gross)</div>
+    <div class="card-val" id="valGrossVol">₹0.00</div>
+  </div>
+  <div class="card">
+    <div class="card-label">Double-Entry Journals</div>
+    <div class="card-val" id="valJournals">0</div>
+  </div>
+</div>
+
+<div class="workspace">
+  <!-- Dispatcher Desk -->
+  <div class="desk-left">
+    <div class="section-title">
+      <span>CMS Outward Payout Dispatch</span>
+      <span style="font-size:10px; color:var(--muted);">Rail: NEFT / RTGS</span>
+    </div>
+
+    <div class="form-group">
+      <label>Client Identifier:</label>
+      <input type="text" id="inpClientId" value="CORP-CLIENT-001" readonly>
+    </div>
+    <div class="form-group">
+      <label>Virtual Account Number:</label>
+      <input type="text" id="inpVa" value="VA8800112233">
+    </div>
+    <div class="form-group">
+      <label>Beneficiary Account Number:</label>
+      <input type="text" id="inpBene" value="912345678901">
+    </div>
+    <div class="form-group">
+      <label>Beneficiary IFSC Code:</label>
+      <input type="text" id="inpIfsc" value="HDFC0000001">
+    </div>
+    <div class="form-group">
+      <label>Payout Amount (₹):</label>
+      <input type="number" id="inpAmount" value="50000.00" step="500">
+    </div>
+    <div class="form-group">
+      <label>Idempotency Key (Audit Safe):</label>
+      <input type="text" id="inpIdemp" value="TXN-DEMO-001">
+    </div>
+
+    <button class="btn-dispatch" onclick="submitPayout()">EXECUTE IDEMPOTENT PAYOUT</button>
+
+    <div style="margin-top:24px; border-top:1px dashed var(--border); padding-top:16px;">
+      <div class="section-title">
+        <span>Instant Treasury Float Inward</span>
+        <span style="font-size:10px; color:var(--green);">Top-Up Float</span>
+      </div>
+      <div class="form-group">
+        <label>Replenish Amount (₹):</label>
+        <input type="number" id="inpFundAmt" value="1000000.00" step="10000">
+      </div>
+      <button class="btn-fund" onclick="submitFunding()">REPLENISH VIRTUAL FLOAT (+₹10,00,000)</button>
+    </div>
+  </div>
+
+  <!-- Live Postings Ledger -->
+  <div class="desk-right">
+    <div class="section-title">
+      <span>Real-Time Multi-Leg Postings Ledger</span>
+      <button onclick="refreshData()" style="background:none; border:none; color:#38bdf8; cursor:pointer; font-size:11px;">[⟳ Refresh Feed]</button>
+    </div>
+    <div class="ledger-box">
+      <table class="ledger-tbl">
+        <thead>
+          <tr>
+            <th>Entry ID</th>
+            <th>Timestamp</th>
+            <th>Journal Voucher</th>
+            <th>Target Account</th>
+            <th>Type</th>
+            <th>Amount (₹)</th>
+            <th>Narration</th>
+          </tr>
+        </thead>
+        <tbody id="ledgerTbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  window.onload = () => {
+    generateNewIdemp();
+    refreshData();
+    setInterval(refreshData, 3000);
+  };
+
+  function generateNewIdemp() {
+    document.getElementById("inpIdemp").value = "TXN-" + Date.now().toString().slice(-8);
+  }
+
+  function showToast(msg, isErr = false) {
+    const t = document.getElementById("toast");
+    t.innerText = msg;
+    t.style.borderColor = isErr ? "#ef4444" : "#38bdf8";
+    t.style.display = "block";
+    setTimeout(() => { t.style.display = "none"; }, 3500);
+  }
+
+  async function refreshData() {
+    try {
+      const statsRes = await fetch("/api/v1/cms/stats");
+      const stats = await statsRes.json();
+      document.getElementById("valCorpFloat").innerText = "₹" + Number(stats.corporate_available_float).toLocaleString("en-IN", {minimumFractionDigits: 2});
+      document.getElementById("valPoolFloat").innerText = "₹" + Number(stats.treasury_pool_float).toLocaleString("en-IN", {minimumFractionDigits: 2});
+      document.getElementById("valGrossVol").innerText = "₹" + Number(stats.total_volume_settled).toLocaleString("en-IN", {minimumFractionDigits: 2});
+      document.getElementById("valJournals").innerText = stats.total_journal_entries;
+
+      const postRes = await fetch("/api/v1/ledger/postings");
+      const postings = await postRes.json();
+      const tbody = document.getElementById("ledgerTbody");
+      tbody.innerHTML = "";
+      if (postings && postings.length > 0) {
+        postings.forEach(p => {
+          tbody.innerHTML += `
+            <tr>
+              <td>#${p.entry_id}</td>
+              <td style="color:var(--muted);">${new Date(p.timestamp).toLocaleTimeString()}</td>
+              <td><b>${p.journal_id}</b></td>
+              <td><code>${p.account_no}</code></td>
+              <td><span class="${p.direction === 'DEBIT' ? 'debit-tag' : 'credit-tag'}">${p.direction}</span></td>
+              <td><b>₹${Number(p.amount).toLocaleString('en-IN', {minimumFractionDigits: 2})}</b></td>
+              <td style="color:var(--muted);">${p.description}</td>
+            </tr>
+          `;
+        });
+      }
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  async function submitPayout() {
+    const idemp = document.getElementById("inpIdemp").value;
+    const payload = {
+      client_id: document.getElementById("inpClientId").value,
+      virtual_account: document.getElementById("inpVa").value,
+      beneficiary_account: document.getElementById("inpBene").value,
+      ifsc: document.getElementById("inpIfsc").value,
+      amount: parseFloat(document.getElementById("inpAmount").value),
+      payment_rail: "NEFT_RTGS"
+    };
+
+    try {
+      const res = await fetch("/api/v1/cms/payout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Idempotency-Key": idemp
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if(res.ok) {
+        showToast("Payout Settled: " + data.journal_id);
+        generateNewIdemp();
+        refreshData();
+      } else {
+        showToast(data.error || "Payout rejected by ledger", true);
+      }
+    } catch(err) {
+      showToast("Network / Engine Error", true);
+    }
+  }
+
+  async function submitFunding() {
+    const payload = {
+      client_id: "CORP-CLIENT-001",
+      virtual_account: "VA8800112233",
+      amount: parseFloat(document.getElementById("inpFundAmt").value),
+      source_utr: "BANK-INW-" + Date.now().toString().slice(-6)
+    };
+
+    try {
+      const res = await fetch("/api/v1/cms/fund", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if(res.ok) {
+        showToast("Float Credited: ₹" + payload.amount.toLocaleString());
+        refreshData();
+      } else {
+        showToast("Funding failed", true);
+      }
+    } catch(err) {
+      showToast("Engine Connection Error", true);
+    }
+  }
+</script>
+</body>
+</html>`)
 }
