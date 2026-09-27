@@ -36,6 +36,15 @@ type FundRequest struct {
 	SourceUTR      string  `json:"source_utr"`
 }
 
+type AccountRecord struct {
+	AccountNumber string    `json:"account_number"`
+	ClientID      string    `json:"client_id"`
+	Currency      string    `json:"currency"`
+	Balance       float64   `json:"balance"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type PostingRecord struct {
 	EntryID     int64     `json:"entry_id"`
 	JournalID   string    `json:"journal_id"`
@@ -102,13 +111,14 @@ func initDB(dsn string) {
 	INSERT INTO accounts (account_number, client_id, currency, balance, status)
 	VALUES 
 		('VA8800112233', 'CORP-CLIENT-001', 'INR', 10000000.0000, 'ACTIVE'),
+		('VA8800112244', 'CORP-CLIENT-002', 'INR', 5000000.0000, 'ACTIVE'),
 		('ESCROW-POOL-01', 'TREASURY-001', 'INR', 50000000.0000, 'ACTIVE'),
 		('RBI-SETTLEMENT-CLEARING', 'RBI-RAIL-01', 'INR', 0.0000, 'ACTIVE')
 	ON CONFLICT (account_number) 
 	DO UPDATE SET balance = accounts.balance;
 	`
 	if _, err := db.Exec(schema); err != nil {
-		log.Printf("[WARN] Schema initialization notice: %v", err)
+		log.Printf("[WARN] Schema notice: %v", err)
 	}
 }
 
@@ -141,7 +151,7 @@ func initRedis() {
 	defer cancel()
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Printf("[WARN] Redis ping notice: %v (falling back to local memory locks)", err)
+		log.Printf("[WARN] Redis notice: %v (local fallback active)", err)
 	} else {
 		log.Println("[INFO] Redis distributed lock engine online")
 	}
@@ -158,15 +168,11 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// 1. Root Workstation Terminal
 	mux.HandleFunc("/", serveTerminal)
-
-	// 2. Health & Telemetry
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/health", handleHealthz)
 	mux.HandleFunc("/api/v1/cms/stats", handleStats)
-
-	// 3. Banking APIs
+	mux.HandleFunc("/api/v1/cms/accounts", handleAccounts)
 	mux.HandleFunc("/api/v1/cms/payout", handlePayout)
 	mux.HandleFunc("/api/v1/cms/fund", handleFund)
 	mux.HandleFunc("/api/v1/ledger/postings", handlePostings)
@@ -206,13 +212,30 @@ func main() {
 
 func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":      "OPERATIONAL",
 		"timestamp":   time.Now().UTC(),
 		"cluster":     "TBG-PROD-CORE-01",
 		"services":    map[string]string{"postgres": "ONLINE", "redis": "ONLINE", "ledger_engine": "BALANCED"},
 	})
+}
+
+func handleAccounts(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	rows, err := db.Query("SELECT account_number, client_id, currency, balance, status, created_at FROM accounts ORDER BY account_number ASC")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var list []AccountRecord
+	for rows.Next() {
+		var a AccountRecord
+		rows.Scan(&a.AccountNumber, &a.ClientID, &a.Currency, &a.Balance, &a.Status, &a.CreatedAt)
+		list = append(list, a)
+	}
+	json.NewEncoder(w).Encode(list)
 }
 
 func handleStats(w http.ResponseWriter, r *http.Request) {
@@ -226,7 +249,7 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 	db.QueryRow("SELECT COUNT(*) FROM journal_entries").Scan(&txnCount)
 
 	var totalSettled float64
-	db.QueryRow("SELECT COALESCE(SUM(amount), 0) FROM postings WHERE direction = 'DEBIT' AND account_no = 'VA8800112233'").Scan(&totalSettled)
+	db.QueryRow("SELECT COALESCE(SUM(amount), 0) FROM postings WHERE direction = 'DEBIT' AND account_no LIKE 'VA%'").Scan(&totalSettled)
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"corporate_virtual_account": "VA8800112233",
@@ -241,7 +264,7 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 
 func handlePostings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	rows, err := db.Query("SELECT entry_id, journal_id, account_no, direction, amount, description, created_at FROM postings ORDER BY entry_id DESC LIMIT 40")
+	rows, err := db.Query("SELECT entry_id, journal_id, account_no, direction, amount, description, created_at FROM postings ORDER BY entry_id DESC LIMIT 60")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -289,20 +312,19 @@ func handleFund(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 
 	_, err = tx.Exec(`INSERT INTO journal_entries (journal_id, reference_no, narration) VALUES ($1, $2, $3)`,
-		journalID, refNo, fmt.Sprintf("Inward liquidity replenishment for %s", req.VirtualAccount))
+		journalID, refNo, fmt.Sprintf("Treasury Inward Liquidity for %s", req.VirtualAccount))
 	if err != nil {
-		http.Error(w, "Duplicate UTR reference or ledger error", http.StatusConflict)
+		http.Error(w, "Duplicate UTR reference or ledger conflict", http.StatusConflict)
 		return
 	}
 
-	// Double-entry: Debit Escrow Clearing, Credit Virtual Account
 	tx.Exec(`INSERT INTO accounts (account_number, client_id, currency, balance) VALUES ($1, $2, 'INR', $3)
 	         ON CONFLICT (account_number) DO UPDATE SET balance = accounts.balance + $3`,
 		req.VirtualAccount, req.ClientID, req.Amount)
 
 	tx.Exec(`INSERT INTO postings (journal_id, account_no, direction, amount, description) VALUES
-		($1, 'ESCROW-POOL-01', 'DEBIT', $2, 'Treasury Pool Clearing Inward'),
-		($1, $3, 'CREDIT', $2, 'Corporate Float Credit')`,
+		($1, 'ESCROW-POOL-01', 'DEBIT', $2, 'Treasury Inward Clearing'),
+		($1, $3, 'CREDIT', $2, 'Corporate Float Replenishment')`,
 		journalID, req.Amount, req.VirtualAccount)
 
 	if err := tx.Commit(); err != nil {
@@ -333,7 +355,6 @@ func handlePayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Distributed Idempotency Lock via Redis
 	lockKey := "idemp:" + idempotencyKey
 	if rdb != nil {
 		ok, _ := rdb.SetNX(context.Background(), lockKey, "PROCESSING", 24*time.Hour).Result()
@@ -364,7 +385,6 @@ func handlePayout(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// 1. Pessimistic Balance Verification with Lock
 	var currentBalance float64
 	err = tx.QueryRow(`SELECT balance FROM accounts WHERE account_number = $1 FOR UPDATE`, req.VirtualAccount).Scan(&currentBalance)
 	if err == sql.ErrNoRows {
@@ -376,25 +396,22 @@ func handlePayout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2. Debit Float
 	_, err = tx.Exec(`UPDATE accounts SET balance = balance - $1 WHERE account_number = $2`, req.Amount, req.VirtualAccount)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// 3. Write Balanced Journal
 	journalID := fmt.Sprintf("JRN-OUT-%d", time.Now().UnixNano())
 	_, err = tx.Exec(`INSERT INTO journal_entries (journal_id, reference_no, narration) VALUES ($1, $2, $3)`,
 		journalID, idempotencyKey, fmt.Sprintf("CMS Outward Payout via %s to %s", req.PaymentRail, req.BeneficiaryAccount))
 	if err != nil {
-		http.Error(w, `{"error": "Transaction reference already recorded"}`, http.StatusConflict)
+		http.Error(w, `{"error": "Transaction reference already recorded in journal"}`, http.StatusConflict)
 		return
 	}
 
-	// Multi-leg double entry: Debit Corporate Virtual Account, Credit Settlement Clearing
 	_, err = tx.Exec(`INSERT INTO postings (journal_id, account_no, direction, amount, description) VALUES
-		($1, $2, 'DEBIT', $3, 'Virtual Account Float Deduction'),
+		($1, $2, 'DEBIT', $3, 'Virtual Account Float Debit'),
 		($1, 'RBI-SETTLEMENT-CLEARING', 'CREDIT', $3, 'Outward Rail Settlement Clearing')`,
 		journalID, req.VirtualAccount, req.Amount)
 	if err != nil {
@@ -429,160 +446,255 @@ func serveTerminal(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprintf(w, `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TBG-CORE | Transaction Banking Terminal</title>
 <style>
-  :root {
+  :root[data-theme="dark"] {
     --bg: #090d16; --surface: #111827; --panel: #162032; --border: #1f293d;
-    --accent: #0ea5e9; --accent-glow: rgba(14, 165, 233, 0.2);
+    --accent: #0284c7; --accent-hover: #0369a1; --accent-glow: rgba(14, 165, 233, 0.2);
     --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
-    --text: #f1f5f9; --muted: #94a3b8;
+    --text: #f1f5f9; --muted: #94a3b8; --input-bg: #0b1120;
+    --badge-bg: #0369a1; --table-header: #131d31; --card-val: #ffffff;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "JetBrains Mono", "Segoe UI", monospace; }
+  :root[data-theme="light"] {
+    --bg: #f8fafc; --surface: #ffffff; --panel: #f1f5f9; --border: #cbd5e1;
+    --accent: #0284c7; --accent-hover: #0369a1; --accent-glow: rgba(2, 132, 199, 0.2);
+    --green: #059669; --red: #dc2626; --yellow: #d97706;
+    --text: #0f172a; --muted: #64748b; --input-bg: #ffffff;
+    --badge-bg: #e0f2fe; --table-header: #e2e8f0; --card-val: #0f172a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "JetBrains Mono", "Segoe UI", monospace; transition: background 0.15s, color 0.15s, border-color 0.15s; }
   body { background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 13px; }
 
-  /* Top Navigation */
-  header { height: 48px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
-  .logo { font-size: 14px; font-weight: 800; color: #38bdf8; display: flex; align-items: center; gap: 8px; letter-spacing: 0.5px; }
-  .badge { background: #0369a1; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+  /* Header */
+  header { height: 50px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
+  .brand { font-size: 14px; font-weight: 800; color: #38bdf8; display: flex; align-items: center; gap: 8px; letter-spacing: 0.5px; }
+  .badge { background: var(--badge-bg); color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+  :root[data-theme="light"] .badge { color: #0369a1; border: 1px solid #bae6fd; }
+  .nav-right { display: flex; align-items: center; gap: 12px; }
+  .theme-toggle { background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 700; }
   .live-dot { width: 8px; height: 8px; border-radius: 50%%; background: var(--green); box-shadow: 0 0 8px var(--green); display: inline-block; margin-right: 4px; }
+
+  /* Tab Navigation */
+  .tab-strip { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 16px; gap: 6px; }
+  .tab-btn { background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); padding: 10px 14px; font-size: 12px; font-weight: 700; cursor: pointer; }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
 
   /* Metric Ribbon */
   .ribbon { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
   .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; }
   .card-label { font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: 0.5px; }
-  .card-val { font-size: 18px; font-weight: 800; margin-top: 4px; color: #fff; }
+  .card-val { font-size: 18px; font-weight: 800; margin-top: 4px; color: var(--card-val); }
 
-  /* Workspace */
-  .workspace { display: grid; grid-template-columns: 420px 1fr; height: calc(100vh - 130px); }
-  
-  /* Left Desk: Transaction Dispatcher */
-  .desk-left { background: var(--surface); border-right: 1px solid var(--border); padding: 16px; overflow-y: auto; }
+  /* Workstation View */
+  .view-container { display: flex; flex: 1; overflow: hidden; }
+  .view-panel { display: none; width: 100%%; height: 100%%; }
+  .view-panel.active { display: flex; }
+
+  /* Desk Split */
+  .desk-left { width: 440px; background: var(--surface); border-right: 1px solid var(--border); padding: 18px; overflow-y: auto; }
+  .desk-right { flex: 1; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; padding: 16px; }
   .section-title { font-size: 11px; text-transform: uppercase; font-weight: 800; color: #38bdf8; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-  .form-group { margin-bottom: 10px; }
-  .form-group label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
-  .form-group input, .form-group select { width: 100%%; background: #0b1120; border: 1px solid var(--border); border-radius: 4px; color: #fff; padding: 8px 10px; font-size: 12px; outline: none; }
-  .form-group input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
-  .btn-dispatch { width: 100%%; background: var(--accent); color: #fff; border: none; padding: 10px; border-radius: 4px; font-weight: 700; cursor: pointer; margin-top: 6px; }
-  .btn-dispatch:hover { background: #0284c7; }
-  .btn-fund { width: 100%%; background: #10b981; color: #fff; border: none; padding: 8px; border-radius: 4px; font-weight: 700; cursor: pointer; margin-top: 6px; font-size: 11px; }
 
-  /* Right Desk: Live Postings Ledger Audit */
-  .desk-right { background: var(--bg); display: flex; flex-direction: column; overflow: hidden; padding: 16px; }
+  /* Forms */
+  .form-group { margin-bottom: 12px; }
+  .form-group label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
+  .form-group input, .form-group select { width: 100%%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 8px 10px; font-size: 12px; outline: none; }
+  .form-group input:focus, .form-group select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+  .btn-action { width: 100%%; background: var(--accent); color: #fff; border: none; padding: 11px; border-radius: 4px; font-weight: 700; cursor: pointer; font-size: 12px; }
+  .btn-action:hover { background: var(--accent-hover); }
+  .btn-fund { background: var(--green); }
+
+  /* Tables */
   .ledger-box { flex: 1; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
   .ledger-tbl { width: 100%%; border-collapse: collapse; font-size: 11px; }
-  .ledger-tbl th { background: #131d31; color: var(--muted); padding: 8px 12px; text-align: left; position: sticky; top: 0; font-size: 10px; text-transform: uppercase; border-bottom: 1px solid var(--border); }
-  .ledger-tbl td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
-  .debit-tag { color: #f87171; font-weight: 700; }
-  .credit-tag { color: #4ade80; font-weight: 700; }
+  .ledger-tbl th { background: var(--table-header); color: var(--muted); padding: 8px 12px; text-align: left; position: sticky; top: 0; font-size: 10px; text-transform: uppercase; border-bottom: 1px solid var(--border); z-index: 10; }
+  .ledger-tbl td { padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  .debit-tag { color: var(--red); font-weight: 700; }
+  .credit-tag { color: var(--green); font-weight: 700; }
 
-  /* Notification Toast */
-  #toast { display: none; position: fixed; bottom: 20px; right: 20px; background: #1e293b; border: 1px solid #38bdf8; color: #fff; padding: 12px 18px; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); z-index: 99; }
+  /* Search & Controls */
+  .ctrl-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 10px; }
+  .search-box { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-size: 11px; width: 260px; }
+
+  /* Toast Notification */
+  #toast { display: none; position: fixed; bottom: 20px; right: 20px; background: var(--surface); border: 1.5px solid var(--accent); color: var(--text); padding: 12px 18px; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); z-index: 99; font-size: 12px; }
 </style>
 </head>
 <body>
 
 <header>
-  <div class="logo">
+  <div class="brand">
     <span>⚡ TBG-CORE TRANSACTION BANKING ENGINE</span>
-    <span class="badge">PROD-ACID</span>
+    <span class="badge">PROD-ACID v12.4</span>
   </div>
-  <div style="font-size:11px; color:var(--muted);">
-    <span class="live-dot"></span>PostgreSQL 16 • Redis 7.2 • ISO-20022 Engine Online
+  <div class="nav-right">
+    <span style="font-size:11px; color:var(--muted);"><span class="live-dot"></span>Postgres 16 • Redis 7.2 • ISO-20022</span>
+    <button class="theme-toggle" onclick="toggleTheme()">☀️ / 🌙 Theme</button>
   </div>
 </header>
 
+<div class="tab-strip">
+  <button class="tab-btn active" onclick="switchView('WORKSTATION', this)">Payouts & Live Ledger</button>
+  <button class="tab-btn" onclick="switchView('ACCOUNTS', this)">Virtual Accounts Master</button>
+  <button class="tab-btn" onclick="switchView('TREASURY', this)">Inward Treasury Replenish</button>
+  <button class="tab-btn" onclick="switchView('TELEMETRY', this)">System Health & Nodes</button>
+</div>
+
 <div class="ribbon">
   <div class="card">
-    <div class="card-label">Corporate Float Balance</div>
+    <div class="card-label">Corporate Float Balance (VA8800112233)</div>
     <div class="card-val" id="valCorpFloat">₹0.00</div>
   </div>
   <div class="card">
-    <div class="card-label">Treasury Pool Collateral</div>
+    <div class="card-label">Treasury Pool Collateral (ESCROW-01)</div>
     <div class="card-val" id="valPoolFloat">₹0.00</div>
   </div>
   <div class="card">
-    <div class="card-label">Settled Volume (Gross)</div>
+    <div class="card-label">Settled Payout Volume (Gross)</div>
     <div class="card-val" id="valGrossVol">₹0.00</div>
   </div>
   <div class="card">
-    <div class="card-label">Double-Entry Journals</div>
+    <div class="card-label">Balanced Double-Entry Journals</div>
     <div class="card-val" id="valJournals">0</div>
   </div>
 </div>
 
-<div class="workspace">
-  <!-- Dispatcher Desk -->
-  <div class="desk-left">
-    <div class="section-title">
-      <span>CMS Outward Payout Dispatch</span>
-      <span style="font-size:10px; color:var(--muted);">Rail: NEFT / RTGS</span>
-    </div>
-
-    <div class="form-group">
-      <label>Client Identifier:</label>
-      <input type="text" id="inpClientId" value="CORP-CLIENT-001" readonly>
-    </div>
-    <div class="form-group">
-      <label>Virtual Account Number:</label>
-      <input type="text" id="inpVa" value="VA8800112233">
-    </div>
-    <div class="form-group">
-      <label>Beneficiary Account Number:</label>
-      <input type="text" id="inpBene" value="912345678901">
-    </div>
-    <div class="form-group">
-      <label>Beneficiary IFSC Code:</label>
-      <input type="text" id="inpIfsc" value="HDFC0000001">
-    </div>
-    <div class="form-group">
-      <label>Payout Amount (₹):</label>
-      <input type="number" id="inpAmount" value="50000.00" step="500">
-    </div>
-    <div class="form-group">
-      <label>Idempotency Key (Audit Safe):</label>
-      <input type="text" id="inpIdemp" value="TXN-DEMO-001">
-    </div>
-
-    <button class="btn-dispatch" onclick="submitPayout()">EXECUTE IDEMPOTENT PAYOUT</button>
-
-    <div style="margin-top:24px; border-top:1px dashed var(--border); padding-top:16px;">
+<div class="view-container">
+  <!-- VIEW 1: PAYOUTS & LIVE LEDGER -->
+  <div class="view-panel active" id="viewWORKSTATION">
+    <div class="desk-left">
       <div class="section-title">
-        <span>Instant Treasury Float Inward</span>
-        <span style="font-size:10px; color:var(--green);">Top-Up Float</span>
+        <span>CMS Outward Payout Dispatch</span>
+        <span style="font-size:10px; color:var(--muted);">Rail: NEFT / RTGS</span>
+      </div>
+
+      <div class="form-group">
+        <label>Debit Virtual Account:</label>
+        <select id="inpVaSelect" onchange="syncSelectedVa()">
+          <option value="VA8800112233">VA8800112233 (Corporate Primary Float)</option>
+          <option value="VA8800112244">VA8800112244 (Secondary Operations)</option>
+        </select>
       </div>
       <div class="form-group">
-        <label>Replenish Amount (₹):</label>
-        <input type="number" id="inpFundAmt" value="1000000.00" step="10000">
+        <label>Client Reference ID:</label>
+        <input type="text" id="inpClientId" value="CORP-CLIENT-001" readonly>
       </div>
-      <button class="btn-fund" onclick="submitFunding()">REPLENISH VIRTUAL FLOAT (+₹10,00,000)</button>
+      <div class="form-group">
+        <label>Beneficiary Account Number:</label>
+        <input type="text" id="inpBene" value="912345678901">
+      </div>
+      <div class="form-group">
+        <label>Beneficiary IFSC Code:</label>
+        <input type="text" id="inpIfsc" value="HDFC0000001">
+      </div>
+      <div class="form-group">
+        <label>Payout Amount (₹):</label>
+        <input type="number" id="inpAmount" value="25000.00" step="500">
+      </div>
+      <div class="form-group">
+        <label>Idempotency Key (Distributed Safe):</label>
+        <input type="text" id="inpIdemp" value="TXN-DEMO-001">
+      </div>
+
+      <button class="btn-action" onclick="submitPayout()">EXECUTE IDEMPOTENT PAYOUT</button>
+    </div>
+
+    <div class="desk-right">
+      <div class="ctrl-bar">
+        <div class="section-title" style="margin:0;">Real-Time Postings Ledger</div>
+        <div style="display:flex; gap:8px;">
+          <input type="text" class="search-box" id="inpLedgerSearch" placeholder="Filter by Account or Journal..." oninput="filterLedger()">
+          <button class="theme-toggle" onclick="exportLedgerCSV()">Export CSV</button>
+          <button class="theme-toggle" onclick="refreshData()">⟳ Refresh</button>
+        </div>
+      </div>
+      <div class="ledger-box">
+        <table class="ledger-tbl">
+          <thead>
+            <tr>
+              <th>Entry ID</th>
+              <th>Timestamp</th>
+              <th>Journal Voucher</th>
+              <th>Target Account</th>
+              <th>Type</th>
+              <th>Amount (₹)</th>
+              <th>Narration</th>
+            </tr>
+          </thead>
+          <tbody id="ledgerTbody"></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
-  <!-- Live Postings Ledger -->
-  <div class="desk-right">
-    <div class="section-title">
-      <span>Real-Time Multi-Leg Postings Ledger</span>
-      <button onclick="refreshData()" style="background:none; border:none; color:#38bdf8; cursor:pointer; font-size:11px;">[⟳ Refresh Feed]</button>
-    </div>
+  <!-- VIEW 2: VIRTUAL ACCOUNTS MASTER -->
+  <div class="view-panel" id="viewACCOUNTS" style="padding:20px; overflow-y:auto; flex-direction:column;">
+    <div class="section-title">Corporate Virtual Account Directory & Position</div>
     <div class="ledger-box">
       <table class="ledger-tbl">
         <thead>
           <tr>
-            <th>Entry ID</th>
-            <th>Timestamp</th>
-            <th>Journal Voucher</th>
-            <th>Target Account</th>
-            <th>Type</th>
-            <th>Amount (₹)</th>
-            <th>Narration</th>
+            <th>Virtual Account No</th>
+            <th>Client Identifier</th>
+            <th>Currency</th>
+            <th>Available Ledger Balance</th>
+            <th>Operating Status</th>
+            <th>Created At</th>
           </tr>
         </thead>
-        <tbody id="ledgerTbody"></tbody>
+        <tbody id="accountsTbody"></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- VIEW 3: INWARD TREASURY DESK -->
+  <div class="view-panel" id="viewTREASURY" style="padding:24px;">
+    <div style="max-width:540px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:20px;">
+      <div class="section-title">Treasury Float Inward / Top-Up Rail</div>
+      <div class="form-group">
+        <label>Credit Target Account:</label>
+        <select id="inpFundTarget">
+          <option value="VA8800112233">VA8800112233 (Corporate Primary Float)</option>
+          <option value="VA8800112244">VA8800112244 (Secondary Operations)</option>
+          <option value="ESCROW-POOL-01">ESCROW-POOL-01 (Treasury Pool Collateral)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Inward Deposit Amount (₹):</label>
+        <input type="number" id="inpFundAmt" value="1000000.00" step="50000">
+      </div>
+      <div class="form-group">
+        <label>Source Bank UTR / Clearing Reference:</label>
+        <input type="text" id="inpFundUtr" placeholder="BANK-INW-778899">
+      </div>
+      <button class="btn-action btn-fund" onclick="submitFunding()">REPLENISH VIRTUAL FLOAT</button>
+    </div>
+  </div>
+
+  <!-- VIEW 4: SYSTEM HEALTH & TELEMETRY -->
+  <div class="view-panel" id="viewTELEMETRY" style="padding:24px; flex-direction:column; gap:16px;">
+    <div class="section-title">Core Subsystem Telemetry</div>
+    <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:16px;">
+      <div class="card">
+        <div class="card-label">Relational Engine</div>
+        <div class="card-val" style="color:var(--green);">PostgreSQL 16 (ACID)</div>
+        <div style="font-size:11px; color:var(--muted); margin-top:6px;">Max Open Conns: 50 | Idle: 10</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Distributed Cache & Locks</div>
+        <div class="card-val" style="color:var(--green);">Redis Stack 7.2</div>
+        <div style="font-size:11px; color:var(--muted); margin-top:6px;">Key TTL: 24h Idempotency Guard</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Clearing Rails</div>
+        <div class="card-val" style="color:var(--accent);">ISO 20022 Engine</div>
+        <div style="font-size:11px; color:var(--muted); margin-top:6px;">pacs.008 / pain.001 Real-Time Sync</div>
+      </div>
     </div>
   </div>
 </div>
@@ -590,11 +702,40 @@ func serveTerminal(w http.ResponseWriter, r *http.Request) {
 <div id="toast"></div>
 
 <script>
+  let cachedPostings = [];
+
   window.onload = () => {
+    initTheme();
     generateNewIdemp();
     refreshData();
+    loadAccounts();
     setInterval(refreshData, 3000);
   };
+
+  function initTheme() {
+    const saved = localStorage.getItem("tbg_theme") || "dark";
+    document.documentElement.setAttribute("data-theme", saved);
+  }
+
+  function toggleTheme() {
+    const cur = document.documentElement.getAttribute("data-theme");
+    const nxt = cur === "dark" ? "light" : "dark";
+    document.documentElement.setAttribute("data-theme", nxt);
+    localStorage.setItem("tbg_theme", nxt);
+  }
+
+  function switchView(viewId, btn) {
+    document.querySelectorAll(".view-panel").forEach(p => p.classList.remove("active"));
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.getElementById("view" + viewId).classList.add("active");
+    btn.classList.add("active");
+    if(viewId === "ACCOUNTS") loadAccounts();
+  }
+
+  function syncSelectedVa() {
+    const va = document.getElementById("inpVaSelect").value;
+    document.getElementById("inpClientId").value = va === "VA8800112233" ? "CORP-CLIENT-001" : "CORP-CLIENT-002";
+  }
 
   function generateNewIdemp() {
     document.getElementById("inpIdemp").value = "TXN-" + Date.now().toString().slice(-8);
@@ -603,7 +744,7 @@ func serveTerminal(w http.ResponseWriter, r *http.Request) {
   function showToast(msg, isErr = false) {
     const t = document.getElementById("toast");
     t.innerText = msg;
-    t.style.borderColor = isErr ? "#ef4444" : "#38bdf8";
+    t.style.borderColor = isErr ? "var(--red)" : "var(--accent)";
     t.style.display = "block";
     setTimeout(() => { t.style.display = "none"; }, 3500);
   }
@@ -618,34 +759,85 @@ func serveTerminal(w http.ResponseWriter, r *http.Request) {
       document.getElementById("valJournals").innerText = stats.total_journal_entries;
 
       const postRes = await fetch("/api/v1/ledger/postings");
-      const postings = await postRes.json();
-      const tbody = document.getElementById("ledgerTbody");
-      tbody.innerHTML = "";
-      if (postings && postings.length > 0) {
-        postings.forEach(p => {
-          tbody.innerHTML += `
-            <tr>
-              <td>#${p.entry_id}</td>
-              <td style="color:var(--muted);">${new Date(p.timestamp).toLocaleTimeString()}</td>
-              <td><b>${p.journal_id}</b></td>
-              <td><code>${p.account_no}</code></td>
-              <td><span class="${p.direction === 'DEBIT' ? 'debit-tag' : 'credit-tag'}">${p.direction}</span></td>
-              <td><b>₹${Number(p.amount).toLocaleString('en-IN', {minimumFractionDigits: 2})}</b></td>
-              <td style="color:var(--muted);">${p.description}</td>
-            </tr>
-          `;
-        });
-      }
+      cachedPostings = await postRes.json();
+      renderLedgerTable(cachedPostings);
     } catch(e) {
       console.error(e);
     }
+  }
+
+  function renderLedgerTable(postings) {
+    const tbody = document.getElementById("ledgerTbody");
+    tbody.innerHTML = "";
+    if (postings && postings.length > 0) {
+      postings.forEach(p => {
+        tbody.innerHTML += `
+          <tr>
+            <td>#${p.entry_id}</td>
+            <td style="color:var(--muted);">${new Date(p.timestamp).toLocaleTimeString()}</td>
+            <td><b>${p.journal_id}</b></td>
+            <td><code>${p.account_no}</code></td>
+            <td><span class="${p.direction === 'DEBIT' ? 'debit-tag' : 'credit-tag'}">${p.direction}</span></td>
+            <td><b>₹${Number(p.amount).toLocaleString('en-IN', {minimumFractionDigits: 2})}</b></td>
+            <td style="color:var(--muted);">${p.description}</td>
+          </tr>
+        `;
+      });
+    }
+  }
+
+  function filterLedger() {
+    const q = document.getElementById("inpLedgerSearch").value.toLowerCase();
+    const filtered = cachedPostings.filter(p => 
+      p.account_no.toLowerCase().includes(q) ||
+      p.journal_id.toLowerCase().includes(q) ||
+      p.description.toLowerCase().includes(q)
+    );
+    renderLedgerTable(filtered);
+  }
+
+  async function loadAccounts() {
+    try {
+      const res = await fetch("/api/v1/cms/accounts");
+      const accounts = await res.json();
+      const tbody = document.getElementById("accountsTbody");
+      tbody.innerHTML = "";
+      accounts.forEach(a => {
+        tbody.innerHTML += `
+          <tr>
+            <td><b>${a.account_number}</b></td>
+            <td>${a.client_id}</td>
+            <td>${a.currency}</td>
+            <td><b style="color:var(--green);">₹${Number(a.balance).toLocaleString('en-IN', {minimumFractionDigits: 2})}</b></td>
+            <td><span style="color:var(--green); font-weight:700;">${a.status}</span></td>
+            <td style="color:var(--muted);">${new Date(a.created_at).toLocaleDateString()}</td>
+          </tr>
+        `;
+      });
+    } catch(e) {
+      console.error(e);
+    }
+  }
+
+  function exportLedgerCSV() {
+    if(!cachedPostings.length) return alert("No ledger postings available to export");
+    let csv = "EntryID,Timestamp,JournalID,Account,Direction,Amount,Description\n";
+    cachedPostings.forEach(p => {
+      csv += `${p.entry_id},"${p.timestamp}","${p.journal_id}","${p.account_no}","${p.direction}",${p.amount},"${p.description}"\n`;
+    });
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `TBG_Ledger_${Date.now()}.csv`;
+    a.click();
   }
 
   async function submitPayout() {
     const idemp = document.getElementById("inpIdemp").value;
     const payload = {
       client_id: document.getElementById("inpClientId").value,
-      virtual_account: document.getElementById("inpVa").value,
+      virtual_account: document.getElementById("inpVaSelect").value,
       beneficiary_account: document.getElementById("inpBene").value,
       ifsc: document.getElementById("inpIfsc").value,
       amount: parseFloat(document.getElementById("inpAmount").value),
@@ -675,11 +867,12 @@ func serveTerminal(w http.ResponseWriter, r *http.Request) {
   }
 
   async function submitFunding() {
+    const targetVa = document.getElementById("inpFundTarget").value;
     const payload = {
-      client_id: "CORP-CLIENT-001",
-      virtual_account: "VA8800112233",
+      client_id: targetVa.startsWith("VA8800112244") ? "CORP-CLIENT-002" : "CORP-CLIENT-001",
+      virtual_account: targetVa,
       amount: parseFloat(document.getElementById("inpFundAmt").value),
-      source_utr: "BANK-INW-" + Date.now().toString().slice(-6)
+      source_utr: document.getElementById("inpFundUtr").value || ("BANK-INW-" + Date.now().toString().slice(-6))
     };
 
     try {
@@ -693,7 +886,7 @@ func serveTerminal(w http.ResponseWriter, r *http.Request) {
         showToast("Float Credited: ₹" + payload.amount.toLocaleString());
         refreshData();
       } else {
-        showToast("Funding failed", true);
+        showToast("Funding failed: " + (data.error || "Conflict"), true);
       }
     } catch(err) {
       showToast("Engine Connection Error", true);
