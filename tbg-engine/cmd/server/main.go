@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -88,7 +87,6 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// 1. Root Landing & API Directory Dashboard
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -129,18 +127,15 @@ func main() {
   "ifsc": "HDFC0000001",
   "amount": 25000.00,
   "payment_rail": "NEFT_RTGS",
-  "idempotency_key": "TXN-` + time.Now().Format("20060102150405") + `"
+  "idempotency_key": "TXN-DEMO-001"
 }</pre>
 </div>
 </body>
 </html>`)
 	})
 
-	// 2. Health check aliases
 	mux.HandleFunc("/healthz", payoutSvc.HandleHealthz)
 	mux.HandleFunc("/health", payoutSvc.HandleHealthz)
-
-	// 3. Operational APIs
 	mux.HandleFunc("/api/v1/cms/payout", payoutSvc.HandlePayout)
 	mux.HandleFunc("/api/v1/cms/stats", payoutSvc.HandleStats)
 
