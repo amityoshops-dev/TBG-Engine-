@@ -83,13 +83,27 @@ func main() {
 	payoutSvc := service.NewPayoutService(repo, lienEngine, rdb, logger, cfg.HMACSalt)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/cms/payout", payoutSvc.HandlePayout)
-	mux.HandleFunc("/api/v1/cms/stats", payoutSvc.HandleStats)
-	mux.HandleFunc("/healthz", payoutSvc.HandleHealthz)
-	mux.HandleFunc("/health", payoutSvc.HandleHealthz)
 
-	// EOD Nostro Settlement Handler
-	mux.HandleFunc("/api/v1/cms/reconcile", func(w http.ResponseWriter, r *http.Request) {
+	// CORS headers taaki alag chalne wala Next.js frontend is API ko call kar sake
+	corsMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-Signature")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			next(w, r)
+		}
+	}
+
+	mux.HandleFunc("/api/v1/cms/payout", corsMiddleware(payoutSvc.HandlePayout))
+	mux.HandleFunc("/api/v1/cms/stats", corsMiddleware(payoutSvc.HandleStats))
+	mux.HandleFunc("/healthz", corsMiddleware(payoutSvc.HandleHealthz))
+	mux.HandleFunc("/health", corsMiddleware(payoutSvc.HandleHealthz))
+
+	mux.HandleFunc("/api/v1/cms/reconcile", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -108,7 +122,6 @@ func main() {
 
 		jvID := uuid.New().String()
 		idemp := "EOD-SETTLE-" + jvID[:8]
-		// Close suspense against central bank settlement nostro
 		merkle, err := repo.PostDoubleEntry(reqCtx, jvID, idemp, service.SuspenseAccount, service.NostroAccount, suspenseBal)
 		if err != nil {
 			http.Error(w, "reconciliation post failed: "+err.Error(), http.StatusInternalServerError)
@@ -125,7 +138,7 @@ func main() {
 			"credit_account":     service.NostroAccount,
 			"settlement_channel": "RBI_NET_SETTLEMENT_FILE",
 		})
-	})
+	}))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -177,188 +190,171 @@ const terminalHTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TBG-CORE | Institutional Banking Workstation</title>
+<title>Finacle Treasury & Stripe Core | Institutional Terminal</title>
 <style>
   :root {
-    --bg-main: #06090e;
-    --bg-surface: #0c111a;
-    --bg-card: #111724;
-    --border: #1e293b;
-    --blue: #2563eb;
+    --bg-base: #030712;
+    --bg-surface: #0b0f19;
+    --bg-card: #111827;
+    --border: #1f2937;
+    --border-subtle: #374151;
+    --text-main: #f9fafb;
+    --text-muted: #9ca3af;
+    --accent: #6366f1;
     --cyan: #06b6d4;
     --green: #10b981;
-    --red: #ef4444;
-    --yellow: #f59e0b;
-    --text-primary: #f8fafc;
-    --text-secondary: #94a3b8;
-    --text-muted: #64748b;
-    --font-mono: "JetBrains Mono", Menlo, monospace;
-    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --red: #f43f5e;
+    --amber: #f59e0b;
+    --mono: "JetBrains Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg-main); color: var(--text-primary); font-family: var(--font-sans); height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 12px; }
+  body { background: var(--bg-base); color: var(--text-main); font-family: var(--sans); height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 12px; }
 
-  header { height: 46px; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; flex-shrink: 0; }
-  .brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-mono); font-weight: 700; font-size: 13px; color: #fff; }
-  .badge { font-family: var(--font-mono); font-size: 10px; padding: 2px 6px; border-radius: 3px; font-weight: 600; text-transform: uppercase; background: rgba(37,99,235,0.2); color: #60a5fa; border: 1px solid rgba(37,99,235,0.4); }
+  header { height: 42px; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 14px; flex-shrink: 0; }
+  .finacle-logo { font-family: var(--mono); font-size: 12px; font-weight: 800; letter-spacing: 0.5px; color: #fff; display: flex; align-items: center; gap: 8px; }
+  .tag { font-family: var(--mono); font-size: 9px; padding: 1px 6px; border-radius: 3px; font-weight: 700; text-transform: uppercase; background: rgba(99,102,241,0.2); color: #818cf8; border: 1px solid rgba(99,102,241,0.3); }
 
-  .telemetry { height: 56px; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; align-items: center; padding: 0 16px; gap: 16px; flex-shrink: 0; }
-  .metric-label { font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; color: var(--text-muted); }
-  .metric-val { font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: #fff; margin-top: 2px; }
-  .track { height: 4px; background: var(--border); border-radius: 2px; margin-top: 4px; overflow: hidden; }
-  .track-fill { height: 100%; background: linear-gradient(90deg, var(--blue), var(--cyan)); width: 100%; transition: width 0.3s; }
+  .ribbon { height: 50px; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; align-items: center; padding: 0 14px; gap: 14px; flex-shrink: 0; }
+  .metric-box { display: flex; flex-direction: column; }
+  .metric-label { font-family: var(--mono); font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
+  .metric-val { font-family: var(--mono); font-size: 13px; font-weight: 700; color: #fff; margin-top: 1px; }
 
-  .workspace { display: grid; grid-template-columns: 360px 1fr; flex: 1; overflow: hidden; }
+  .workbench { display: grid; grid-template-columns: 340px 1fr; flex: 1; overflow: hidden; }
 
-  .ops { background: var(--bg-surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 16px; gap: 12px; overflow-y: auto; }
-  .block-title { font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); border-bottom: 1px solid var(--border); padding-bottom: 6px; }
-  .field { display: flex; flex-direction: column; gap: 3px; }
-  .field label { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
-  .field input, .field select { background: var(--bg-main); border: 1px solid var(--border); border-radius: 4px; color: #fff; font-family: var(--font-mono); font-size: 11px; padding: 7px 10px; outline: none; }
-  .field input:focus, .field select:focus { border-color: var(--blue); }
-  .btn-dispatch { background: var(--blue); border: none; border-radius: 4px; color: #fff; font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 9px; cursor: pointer; }
-  .btn-dispatch:hover { background: #1d4ed8; }
-  .btn-reconcile { background: #059669; border: none; border-radius: 4px; color: #fff; font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 9px; cursor: pointer; margin-top: 4px; }
-  .btn-reconcile:hover { background: #047857; }
+  .rail-panel { background: var(--bg-surface); border-right: 1px solid var(--border); padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+  .panel-hdr { font-family: var(--mono); font-size: 10px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .form-row { display: flex; flex-direction: column; gap: 2px; }
+  .form-row label { font-family: var(--mono); font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
+  .inp { background: var(--bg-base); border: 1px solid var(--border); border-radius: 3px; color: #fff; font-family: var(--mono); font-size: 11px; padding: 6px 8px; outline: none; }
+  .inp:focus { border-color: var(--accent); }
+  .btn-exec { background: var(--accent); border: none; border-radius: 3px; color: #fff; font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 8px; cursor: pointer; margin-top: 4px; }
+  .btn-exec:hover { background: #4f46e5; }
+  .btn-eod { background: var(--green); border: none; border-radius: 3px; color: #fff; font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 8px; cursor: pointer; }
+  .btn-eod:hover { background: #059669; }
 
-  .canvas { display: flex; flex-direction: column; overflow: hidden; background: var(--bg-main); }
-  .nav-bar { display: flex; background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 0 16px; gap: 8px; }
-  .nav-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; font-weight: 600; padding: 12px 14px; cursor: pointer; text-transform: uppercase; }
-  .nav-tab.active { color: #fff; border-bottom-color: var(--blue); }
+  .main-canvas { display: flex; flex-direction: column; overflow: hidden; background: var(--bg-base); }
+  .canvas-nav { display: flex; background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 0 14px; gap: 4px; }
+  .nav-btn { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-family: var(--mono); font-size: 10px; font-weight: 700; padding: 10px 12px; cursor: pointer; text-transform: uppercase; }
+  .nav-btn.active { color: #fff; border-bottom-color: var(--accent); }
 
-  .view { flex: 1; display: none; overflow: hidden; flex-direction: column; }
-  .view.active { display: flex; }
+  .tab-view { flex: 1; display: none; overflow: hidden; flex-direction: column; }
+  .tab-view.active { display: flex; }
 
-  .flow-box { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
-  .pipeline-nodes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 4px; }
-  .node { background: var(--bg-main); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; cursor: pointer; }
-  .node.active { border-color: var(--green); background: rgba(16,185,129,0.1); }
-  .node.selected { border-color: var(--cyan); }
-  .node-hdr { font-family: var(--font-mono); font-size: 10px; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 6px; }
-  .node-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
-  .node.active .node-dot { background: var(--green); }
-  .node-pkg { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); }
+  .pipeline-bar { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 8px 14px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; flex-shrink: 0; }
+  .step-box { background: var(--bg-base); border: 1px solid var(--border); border-radius: 3px; padding: 6px 8px; font-family: var(--mono); font-size: 9px; font-weight: 700; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+  .step-box.active { border-color: var(--green); color: #fff; background: rgba(16,185,129,0.08); }
+  .s-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-muted); }
+  .step-box.active .s-dot { background: var(--green); }
 
-  .table-wrap { flex: 1; overflow-y: auto; }
-  table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
-  th { background: var(--bg-surface); color: var(--text-muted); padding: 8px 12px; text-align: left; font-size: 10px; text-transform: uppercase; border-bottom: 1px solid var(--border); position: sticky; top: 0; }
-  td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .table-container { flex: 1; overflow-y: auto; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+  th { background: var(--bg-surface); color: var(--text-muted); padding: 6px 10px; text-align: left; font-size: 9px; text-transform: uppercase; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
+  td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
   tr:hover td { background: var(--bg-surface); cursor: pointer; }
-  .tag-dr { color: var(--red); font-weight: 700; }
-  .tag-cr { color: var(--green); font-weight: 700; }
+  .dr-leg { color: var(--red); font-weight: 700; }
+  .cr-leg { color: var(--green); font-weight: 700; }
 
-  .inspectors { display: grid; grid-template-columns: 1fr 1fr; height: 230px; border-top: 1px solid var(--border); background: var(--bg-surface); flex-shrink: 0; }
-  .inspect-pane { display: flex; flex-direction: column; padding: 10px 14px; overflow: hidden; }
-  .inspect-pane:first-child { border-right: 1px solid var(--border); }
-  .pane-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-  .pane-tag { font-family: var(--font-mono); font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-secondary); }
-  .code { flex: 1; background: #040711; border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; font-family: var(--font-mono); font-size: 10px; color: #38bdf8; overflow: auto; white-space: pre; line-height: 1.4; }
+  .split-drawer { display: grid; grid-template-columns: 1fr 1fr; height: 210px; border-top: 1px solid var(--border); background: var(--bg-surface); flex-shrink: 0; }
+  .drawer-col { display: flex; flex-direction: column; padding: 8px 12px; overflow: hidden; }
+  .drawer-col:first-child { border-right: 1px solid var(--border); }
+  .drawer-hdr { font-family: var(--mono); font-size: 9px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .code-block { flex: 1; background: #020617; border: 1px solid var(--border); border-radius: 3px; padding: 8px; font-family: var(--mono); font-size: 10px; color: #38bdf8; overflow: auto; white-space: pre; line-height: 1.3; }
 
-  #toast { display: none; position: fixed; bottom: 20px; right: 20px; background: var(--bg-card); border: 1px solid var(--blue); color: #fff; font-family: var(--font-mono); font-size: 11px; padding: 10px 16px; border-radius: 4px; z-index: 99; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+  #toast { display: none; position: fixed; bottom: 16px; right: 16px; background: var(--bg-card); border: 1px solid var(--accent); color: #fff; font-family: var(--mono); font-size: 10px; padding: 8px 14px; border-radius: 3px; z-index: 99; }
 </style>
 </head>
 <body>
 
 <header>
-  <div class="brand">
-    <span>TBG-CORE TRANSACTION BANKING ENGINE</span>
-    <span class="badge">ACID Ledger</span>
+  <div class="finacle-logo">
+    <span>FINACLE TREASURY // STRIPE LEDGER CORE</span>
+    <span class="tag">PostgreSQL 16 ACID</span>
   </div>
-  <div style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">
-    PostgreSQL 16 Trigger Enforced • Redis 7.2 Lua Locks • ISO-20022 Engine
+  <div style="font-family: var(--mono); font-size: 10px; color: var(--text-muted);">
+    Node: tbg-core-01 • Redis Lua Lien Engine • pacs.008 Clearing
   </div>
 </header>
 
-<div class="telemetry">
-  <div class="telemetry-item">
+<div class="ribbon">
+  <div class="metric-box">
     <div class="metric-label">Corporate Float (00040310001928)</div>
     <div class="metric-val" id="txtFloat">INR 0.00</div>
-    <div class="track"><div class="track-fill" id="floatBar" style="width: 100%;"></div></div>
   </div>
-  <div class="telemetry-item">
-    <div class="metric-label">CMS Suspense Balance</div>
+  <div class="metric-box">
+    <div class="metric-label">CMS Suspense Clearing</div>
     <div class="metric-val" id="txtSuspense" style="color: var(--cyan);">INR 0.00</div>
   </div>
-  <div class="telemetry-item">
+  <div class="metric-box">
     <div class="metric-label">Clearing Rail Mode</div>
-    <div class="metric-val" style="color: var(--yellow);">NEFT / RTGS</div>
+    <div class="metric-val" style="color: var(--amber);">NEFT / RTGS</div>
   </div>
-  <div class="telemetry-item">
-    <div class="metric-label">Execution Latency</div>
-    <div class="metric-val" style="color: var(--green);"><span id="txtLatency">1.10</span> ms</div>
+  <div class="metric-box">
+    <div class="metric-label">P99 Engine Latency</div>
+    <div class="metric-val" style="color: var(--green);"><span id="txtLatency">1.05</span> ms</div>
   </div>
-  <div class="telemetry-item">
-    <div class="metric-label">Ledger Postings</div>
+  <div class="metric-box">
+    <div class="metric-label">Balanced Postings</div>
     <div class="metric-val" id="txtCount">0</div>
   </div>
 </div>
 
-<div class="workspace">
-  <div class="ops">
-    <div class="block-title">CMS Outward Rail Dispatcher</div>
-    <div class="field">
-      <label>Debit Corporate Account</label>
-      <input type="text" id="inpCorpAcc" value="00040310001928" readonly>
+<div class="workbench">
+  <div class="rail-panel">
+    <div class="panel-hdr">Payment Rail Dispatcher</div>
+    <div class="form-row">
+      <label>Originating Float Account</label>
+      <input type="text" class="inp" id="inpCorpAcc" value="00040310001928" readonly>
     </div>
-    <div class="field">
+    <div class="form-row">
       <label>Beneficiary Entity Name</label>
-      <input type="text" id="inpBeneName" value="Tata Motors Fleet Ltd">
+      <input type="text" class="inp" id="inpBeneName" value="Tata Motors Fleet Ltd">
     </div>
-    <div class="field">
+    <div class="form-row">
       <label>Beneficiary Account Number</label>
-      <input type="text" id="inpBeneAcct" value="912345678901">
+      <input type="text" class="inp" id="inpBeneAcct" value="912345678901">
     </div>
-    <div class="field">
+    <div class="form-row">
       <label>Beneficiary IFSC Code</label>
-      <input type="text" id="inpIfsc" value="HDFC0000001">
+      <input type="text" class="inp" id="inpIfsc" value="HDFC0000001">
     </div>
-    <div class="field">
+    <div class="form-row">
       <label>Payout Amount (INR)</label>
-      <input type="number" id="inpAmount" value="25000.00" step="500">
+      <input type="number" class="inp" id="inpAmount" value="25000.00" step="500">
     </div>
-    <div class="field">
-      <label>Clearing Rail Mode</label>
-      <select id="inpRail">
+    <div class="form-row">
+      <label>Rail Protocol</label>
+      <select class="inp" id="inpRail">
         <option value="NEFT">NEFT (National Electronic Fund Transfer)</option>
         <option value="RTGS">RTGS (Real Time Gross Settlement)</option>
       </select>
     </div>
-    <div class="field">
-      <label>Idempotency Reference Key</label>
-      <input type="text" id="inpIdemp" value="TXN-DEMO-001">
+    <div class="form-row">
+      <label>Distributed Idempotency Key</label>
+      <input type="text" class="inp" id="inpIdemp" value="TXN-DEMO-001">
     </div>
-    <button class="btn-dispatch" onclick="submitPayout()">EXECUTE IDEMPOTENT PAYOUT</button>
+    <button class="btn-exec" onclick="submitPayout()">EXECUTE IDEMPOTENT PAYOUT</button>
 
-    <div class="block-title" style="margin-top: 10px;">Central Bank Clearing</div>
-    <button class="btn-reconcile" onclick="triggerReconcile()">TRIGGER EOD NOSTRO SETTLEMENT</button>
+    <div class="panel-hdr" style="margin-top: 10px;">Central Bank Clearing</div>
+    <button class="btn-eod" onclick="triggerReconcile()">TRIGGER EOD NOSTRO SETTLEMENT</button>
   </div>
 
-  <div class="canvas">
-    <div class="nav-bar">
-      <button class="nav-tab active" onclick="switchNav('AUDIT', this)">Double-Entry Audit & Mechanics</button>
-      <button class="nav-tab" onclick="switchNav('ACCOUNTS', this)">Chart of Accounts Master</button>
+  <div class="main-canvas">
+    <div class="canvas-nav">
+      <button class="nav-btn active" onclick="switchNav('AUDIT', this)">Postings Ledger</button>
+      <button class="nav-btn" onclick="switchNav('ACCOUNTS', this)">Chart of Accounts Master</button>
     </div>
 
-    <div class="view active" id="viewAUDIT">
-      <div class="flow-box">
-        <div style="display:flex; justify-content:space-between; font-family:var(--font-mono); font-size:10px; color:var(--text-muted); font-weight:700;">
-          <span>Clearing Mechanics & State Engine</span>
-          <span style="color:var(--cyan);">Click any step to inspect package mechanics</span>
-        </div>
-        <div class="pipeline-nodes">
-          <div class="node" id="node1" onclick="showNode(1)"><div class="node-hdr"><div class="node-dot"></div> 1. IDEMPOTENCY</div><div class="node-pkg">internal/service</div></div>
-          <div class="node" id="node2" onclick="showNode(2)"><div class="node-hdr"><div class="node-dot"></div> 2. LIEN_ENGINE</div><div class="node-pkg">internal/ledger</div></div>
-          <div class="node" id="node3" onclick="showNode(3)"><div class="node-hdr"><div class="node-dot"></div> 3. DOUBLE_ENTRY</div><div class="node-pkg">internal/ledger</div></div>
-          <div class="node" id="node4" onclick="showNode(4)"><div class="node-hdr"><div class="node-dot"></div> 4. ISO20022</div><div class="node-pkg">internal/iso20022</div></div>
-          <div class="node" id="node5" onclick="showNode(5)"><div class="node-hdr"><div class="node-dot"></div> 5. SETTLED</div><div class="node-pkg">internal/service</div></div>
-        </div>
-        <div style="background:var(--bg-surface); border:1px dashed var(--border); border-radius:4px; padding:6px 10px; font-family:var(--font-mono); font-size:11px; color:var(--text-secondary); display:flex; justify-content:space-between;" id="nodeDetailBox">
-          <span id="txtNodeDesc">Step 1: Idempotency Barrier acquires a distributed lock in Redis (SETNX with 24h TTL) to prevent duplicate debits.</span>
-          <code id="txtNodeCode" style="color:var(--cyan);">s.RDB.SetNX(ctx, "idemp:"+key, "PENDING", 24*time.Hour)</code>
-        </div>
+    <div class="tab-view active" id="viewAUDIT">
+      <div class="pipeline-bar">
+        <div class="step-box" id="s1"><div class="s-dot"></div> 1. IDEMPOTENCY</div>
+        <div class="step-box" id="s2"><div class="s-dot"></div> 2. LIEN_HELD</div>
+        <div class="step-box" id="s3"><div class="s-dot"></div> 3. JOURNAL_POSTED</div>
+        <div class="step-box" id="s4"><div class="s-dot"></div> 4. ISO20022_PACS008</div>
+        <div class="step-box" id="s5"><div class="s-dot"></div> 5. SETTLED</div>
       </div>
 
-      <div class="table-wrap">
+      <div class="table-container">
         <table>
           <thead>
             <tr>
@@ -368,63 +364,63 @@ const terminalHTML = `<!DOCTYPE html>
               <th>Account Identifier</th>
               <th>Leg</th>
               <th>Amount (INR)</th>
-              <th>Zero-Sum Audit</th>
+              <th>Zero-Sum Invariant</th>
             </tr>
           </thead>
           <tbody id="ledgerTbody"></tbody>
         </table>
       </div>
 
-      <div class="inspectors">
-        <div class="inspect-pane">
-          <div class="pane-top">
-            <span class="pane-tag">ISO 20022 pacs.008.001.08 XML Wire Message</span>
-            <span style="font-family: var(--font-mono); font-size: 10px; color: var(--text-muted);">Rail: Cleared</span>
+      <div class="split-drawer">
+        <div class="drawer-col">
+          <div class="drawer-hdr">
+            <span>ISO 20022 pacs.008.001.08 Wire Message</span>
+            <span>SFMS / NPCI Ready</span>
           </div>
-          <div class="code" id="xmlScreen">&lt;!-- Select a voucher to view XML wire --&gt;</div>
+          <div class="code-block" id="xmlScreen">&lt;!-- Select a voucher to view XML wire --&gt;</div>
         </div>
-        <div class="inspect-pane">
-          <div class="pane-top">
-            <span class="pane-tag">Outward ERP Webhook Dispatch (HMAC Non-Repudiation)</span>
-            <span style="font-family: var(--font-mono); font-size: 10px; color: var(--green);">HTTP 200 COMMITTED</span>
+        <div class="drawer-col">
+          <div class="drawer-hdr">
+            <span>Outward ERP Webhook Dispatch</span>
+            <span style="color: var(--green);">HMAC-SHA256 SIGNED</span>
           </div>
-          <div class="code" id="webhookScreen">{ "event": "payout.settled", "status": "AWAITING_SELECTION" }</div>
+          <div class="code-block" id="webhookScreen">{ "event": "payout.settled", "status": "AWAITING_SELECTION" }</div>
         </div>
       </div>
     </div>
 
-    <div class="view" id="viewACCOUNTS" style="padding: 20px; overflow-y: auto;">
+    <div class="tab-view" id="viewACCOUNTS" style="padding: 14px; overflow-y: auto;">
       <table>
         <thead>
           <tr>
             <th>Account Identifier</th>
             <th>Designation</th>
-            <th>Account Type</th>
+            <th>Type</th>
             <th>Currency</th>
-            <th>Derived Ledger Position</th>
+            <th>Accounting Invariant</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td><code>00040310001928</code></td>
             <td><b>Corporate Operating Float (Client Float)</b></td>
-            <td><span style="color: var(--yellow); font-weight: 700;">LIABILITY</span></td>
+            <td><span style="color: var(--amber); font-weight: 700;">LIABILITY</span></td>
             <td>INR</td>
-            <td>Derived via Sum(CR) - Sum(DR)</td>
+            <td>Sum(CR) - Sum(DR)</td>
           </tr>
           <tr>
             <td><code>AC_CMS_SUSPENSE_CLEARING_9999</code></td>
             <td><b>CMS Intraday Clearing Suspense</b></td>
             <td><span style="color: var(--cyan); font-weight: 700;">SUSPENSE</span></td>
             <td>INR</td>
-            <td>Accumulates Outward Clearing Debits</td>
+            <td>Net Intra-day Clearing Position</td>
           </tr>
           <tr>
             <td><code>AC_RBI_NOSTRO_0001</code></td>
             <td><b>Central Bank Settlement Nostro</b></td>
             <td><span style="color: var(--green); font-weight: 700;">ASSET</span></td>
             <td>INR</td>
-            <td>End-of-Day Net Clearing Offset Leg</td>
+            <td>EOD Settlement Offset Leg</td>
           </tr>
         </tbody>
       </table>
@@ -438,14 +434,6 @@ const terminalHTML = `<!DOCTYPE html>
   var TOTAL_FLOAT = 10000000.00;
   var cachedPostings = [];
 
-  var mechanics = {
-    1: { desc: "Step 1: Idempotency Barrier acquires a distributed lock in Redis (SETNX with 24h TTL) to prevent duplicate debits.", code: "s.RDB.SetNX(ctx, \"idemp:\"+key, \"PENDING\", 24*time.Hour)" },
-    2: { desc: "Step 2: Lock-Free Lien Engine runs atomic Lua script to hold funds from available corporate float without PostgreSQL row locks.", code: "redis.call('DECRBY', KEYS[1], req) & redis.call('HSET', KEYS[2], ref, req)" },
-    3: { desc: "Step 3: PostgreSQL commits balanced double-entry voucher (DR 00040310001928 / CR Suspense) verified by zero-sum trigger.", code: "INSERT INTO postings (jv_id, account_id, direction, amount) VALUES (..., 'DR', amt), (..., 'CR', amt)" },
-    4: { desc: "Step 4: ISO 20022 Engine builds pacs.008.001.08 credit transfer XML wire payload with unique EndToEndId and UTR.", code: "iso20022.BuildPacs008(msgID, refID, client, beneName, beneAcct, ifsc, ccy, amt)" },
-    5: { desc: "Step 5: Lien permanently released in Redis because funds are now irreversibly committed to the general ledger.", code: "redis.call('HDEL', KEYS[2], ref) -- restore = 0" }
-  };
-
   window.onload = function() {
     generateNewIdemp();
     refreshData();
@@ -453,26 +441,18 @@ const terminalHTML = `<!DOCTYPE html>
   };
 
   function switchNav(id, btn) {
-    document.querySelectorAll(".view").forEach(function(v) { v.classList.remove("active"); });
-    document.querySelectorAll(".nav-tab").forEach(function(b) { b.classList.remove("active"); });
+    document.querySelectorAll(".tab-view").forEach(function(v) { v.classList.remove("active"); });
+    document.querySelectorAll(".nav-btn").forEach(function(b) { b.classList.remove("active"); });
     document.getElementById("view" + id).classList.add("active");
     btn.classList.add("active");
   }
 
-  function showNode(step) {
-    document.querySelectorAll(".node").forEach(function(n) { n.classList.remove("selected"); });
-    document.getElementById("node" + step).classList.add("selected");
-    document.getElementById("txtNodeDesc").innerText = mechanics[step].desc;
-    document.getElementById("txtNodeCode").innerText = mechanics[step].code;
-  }
-
-  function setPipelineStep(step) {
+  function setStep(step) {
     for (var i = 1; i <= 5; i++) {
-      var n = document.getElementById("node" + i);
-      if (i <= step) n.classList.add("active");
-      else n.classList.remove("active");
+      var el = document.getElementById("s" + i);
+      if (i <= step) el.classList.add("active");
+      else el.classList.remove("active");
     }
-    if (mechanics[step]) showNode(step);
   }
 
   function generateNewIdemp() {
@@ -493,11 +473,9 @@ const terminalHTML = `<!DOCTYPE html>
 
       var suspense = Number(data.suspense_balance || 0);
       var avail = TOTAL_FLOAT - suspense;
-      var pct = Math.max(0, Math.min(100, (avail / TOTAL_FLOAT) * 100));
 
       document.getElementById("txtSuspense").innerText = "INR " + suspense.toLocaleString("en-IN", {minimumFractionDigits: 2});
       document.getElementById("txtFloat").innerText = "INR " + avail.toLocaleString("en-IN", {minimumFractionDigits: 2});
-      document.getElementById("floatBar").style.width = pct + "%";
       document.getElementById("txtCount").innerText = data.postings ? data.postings.length : 0;
 
       cachedPostings = data.postings || [];
@@ -520,9 +498,9 @@ const terminalHTML = `<!DOCTYPE html>
           '<td style="color:var(--text-muted);">' + new Date(p.created_at).toLocaleTimeString() + '</td>' +
           '<td><b>' + p.jv_id.slice(0, 18) + '...</b></td>' +
           '<td><code>' + p.account_id + '</code></td>' +
-          '<td><span class="' + (p.direction === "DR" ? "tag-dr" : "tag-cr") + '">' + p.direction + '</span></td>' +
+          '<td><span class="' + (p.direction === "DR" ? "dr-leg" : "cr-leg") + '">' + p.direction + '</span></td>' +
           '<td><b>INR ' + Number(p.amount).toLocaleString('en-IN', {minimumFractionDigits: 2}) + '</b></td>' +
-          '<td><span style="color:var(--green);">✓ Zero-Sum Verified</span></td>' +
+          '<td><span style="color:var(--green);">✓ Zero-Sum Passed</span></td>' +
         '</tr>';
       });
     } else {
@@ -574,7 +552,7 @@ const terminalHTML = `<!DOCTYPE html>
     var amt = parseFloat(document.getElementById("inpAmount").value);
     var rail = document.getElementById("inpRail").value;
 
-    setPipelineStep(1);
+    setStep(1);
     var t0 = performance.now();
 
     var payload = {
@@ -588,7 +566,7 @@ const terminalHTML = `<!DOCTYPE html>
       reference_id: "REF-" + Date.now().toString().slice(-8)
     };
 
-    setTimeout(function() { setPipelineStep(2); }, 60);
+    setTimeout(function() { setStep(2); }, 60);
 
     try {
       var res = await fetch("/api/v1/cms/payout", {
@@ -604,17 +582,17 @@ const terminalHTML = `<!DOCTYPE html>
       document.getElementById("txtLatency").innerText = elapsed;
 
       if(res.ok) {
-        setPipelineStep(5);
+        setStep(5);
         showToast("Settled! UTR: " + data.utr + " (" + elapsed + "ms)");
         generateNewIdemp();
         refreshData();
         inspectVoucher(data.jv_id, payload.amount);
       } else {
-        setPipelineStep(0);
+        setStep(0);
         showToast(data.error || "Payout rejected by ledger");
       }
     } catch(err) {
-      setPipelineStep(0);
+      setStep(0);
       showToast("Engine Connection Error");
     }
   }
