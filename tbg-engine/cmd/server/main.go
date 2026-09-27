@@ -84,26 +84,12 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	// CORS headers taaki alag chalne wala Next.js frontend is API ko call kar sake
-	corsMiddleware := func(next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-Signature")
-			if r.Method == http.MethodOptions {
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-			next(w, r)
-		}
-	}
+	mux.HandleFunc("/api/v1/cms/payout", payoutSvc.HandlePayout)
+	mux.HandleFunc("/api/v1/cms/stats", payoutSvc.HandleStats)
+	mux.HandleFunc("/healthz", payoutSvc.HandleHealthz)
+	mux.HandleFunc("/health", payoutSvc.HandleHealthz)
 
-	mux.HandleFunc("/api/v1/cms/payout", corsMiddleware(payoutSvc.HandlePayout))
-	mux.HandleFunc("/api/v1/cms/stats", corsMiddleware(payoutSvc.HandleStats))
-	mux.HandleFunc("/healthz", corsMiddleware(payoutSvc.HandleHealthz))
-	mux.HandleFunc("/health", corsMiddleware(payoutSvc.HandleHealthz))
-
-	mux.HandleFunc("/api/v1/cms/reconcile", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/v1/cms/reconcile", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -138,7 +124,7 @@ func main() {
 			"credit_account":     service.NostroAccount,
 			"settlement_channel": "RBI_NET_SETTLEMENT_FILE",
 		})
-	}))
+	})
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
@@ -190,62 +176,55 @@ const terminalHTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Finacle Treasury & Stripe Core | Institutional Terminal</title>
+<title>TBG-CORE | Finacle Treasury & Stripe Institutional Terminal</title>
 <style>
   :root {
-    --bg-base: #030712;
-    --bg-surface: #0b0f19;
-    --bg-card: #111827;
-    --border: #1f2937;
-    --border-subtle: #374151;
-    --text-main: #f9fafb;
-    --text-muted: #9ca3af;
-    --accent: #6366f1;
-    --cyan: #06b6d4;
+    --bg-base: #05070c;
+    --bg-surface: #090d16;
+    --bg-card: #0c121e;
+    --border: #1b2436;
+    --border-accent: #0284c7;
+    --text-main: #e2e8f0;
+    --text-muted: #64748b;
+    --cyan: #38bdf8;
     --green: #10b981;
     --red: #f43f5e;
     --amber: #f59e0b;
-    --mono: "JetBrains Mono", monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+    --mono: "JetBrains Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg-base); color: var(--text-main); font-family: var(--sans); height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 12px; }
+  body { background: var(--bg-base); color: var(--text-main); font-family: var(--mono); height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 11px; border-top: 2px solid var(--border-accent); }
 
-  header { height: 42px; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 14px; flex-shrink: 0; }
-  .finacle-logo { font-family: var(--mono); font-size: 12px; font-weight: 800; letter-spacing: 0.5px; color: #fff; display: flex; align-items: center; gap: 8px; }
-  .tag { font-family: var(--mono); font-size: 9px; padding: 1px 6px; border-radius: 3px; font-weight: 700; text-transform: uppercase; background: rgba(99,102,241,0.2); color: #818cf8; border: 1px solid rgba(99,102,241,0.3); }
+  header { height: 38px; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 12px; flex-shrink: 0; }
+  .finacle-logo { font-size: 11px; font-weight: 800; letter-spacing: 0.5px; color: #fff; display: flex; align-items: center; gap: 8px; }
+  .tag { font-size: 9px; padding: 1px 6px; border-radius: 2px; font-weight: 700; text-transform: uppercase; background: rgba(2,132,199,0.15); color: var(--cyan); border: 1px solid rgba(2,132,199,0.3); }
 
-  .ribbon { height: 50px; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; align-items: center; padding: 0 14px; gap: 14px; flex-shrink: 0; }
+  .ribbon { height: 46px; background: var(--bg-card); border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; align-items: center; padding: 0 12px; gap: 12px; flex-shrink: 0; }
   .metric-box { display: flex; flex-direction: column; }
-  .metric-label { font-family: var(--mono); font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
-  .metric-val { font-family: var(--mono); font-size: 13px; font-weight: 700; color: #fff; margin-top: 1px; }
+  .metric-label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; }
+  .metric-val { font-size: 12px; font-weight: 700; color: #fff; margin-top: 1px; }
 
-  .workbench { display: grid; grid-template-columns: 340px 1fr; flex: 1; overflow: hidden; }
+  .workbench { display: grid; grid-template-columns: 310px 1fr; flex: 1; overflow: hidden; }
 
-  .rail-panel { background: var(--bg-surface); border-right: 1px solid var(--border); padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
-  .panel-hdr { font-family: var(--mono); font-size: 10px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  .rail-panel { background: var(--bg-surface); border-right: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
+  .panel-hdr { font-size: 10px; font-weight: 800; color: var(--cyan); text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
   .form-row { display: flex; flex-direction: column; gap: 2px; }
-  .form-row label { font-family: var(--mono); font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
-  .inp { background: var(--bg-base); border: 1px solid var(--border); border-radius: 3px; color: #fff; font-family: var(--mono); font-size: 11px; padding: 6px 8px; outline: none; }
-  .inp:focus { border-color: var(--accent); }
-  .btn-exec { background: var(--accent); border: none; border-radius: 3px; color: #fff; font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 8px; cursor: pointer; margin-top: 4px; }
-  .btn-exec:hover { background: #4f46e5; }
-  .btn-eod { background: var(--green); border: none; border-radius: 3px; color: #fff; font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 8px; cursor: pointer; }
-  .btn-eod:hover { background: #059669; }
+  .form-row label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
+  .inp { background: var(--bg-base); border: 1px solid var(--border); border-radius: 2px; color: #fff; font-family: var(--mono); font-size: 11px; padding: 5px 7px; outline: none; }
+  .inp:focus { border-color: var(--border-accent); }
+  .btn-exec { background: #0284c7; border: none; border-radius: 2px; color: #fff; font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 7px; cursor: pointer; margin-top: 4px; }
+  .btn-exec:hover { background: #0369a1; }
+  .btn-eod { background: #059669; border: none; border-radius: 2px; color: #fff; font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 7px; cursor: pointer; }
+  .btn-eod:hover { background: #047857; }
 
   .main-canvas { display: flex; flex-direction: column; overflow: hidden; background: var(--bg-base); }
-  .canvas-nav { display: flex; background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 0 14px; gap: 4px; }
-  .nav-btn { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-family: var(--mono); font-size: 10px; font-weight: 700; padding: 10px 12px; cursor: pointer; text-transform: uppercase; }
-  .nav-btn.active { color: #fff; border-bottom-color: var(--accent); }
+  .canvas-nav { display: flex; background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 0 10px; gap: 4px; }
+  .nav-btn { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-family: var(--mono); font-size: 10px; font-weight: 700; padding: 9px 11px; cursor: pointer; text-transform: uppercase; }
+  .nav-btn.active { color: var(--cyan); border-bottom-color: var(--cyan); }
 
   .tab-view { flex: 1; display: none; overflow: hidden; flex-direction: column; }
   .tab-view.active { display: flex; }
-
-  .pipeline-bar { background: var(--bg-card); border-bottom: 1px solid var(--border); padding: 8px 14px; display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; flex-shrink: 0; }
-  .step-box { background: var(--bg-base); border: 1px solid var(--border); border-radius: 3px; padding: 6px 8px; font-family: var(--mono); font-size: 9px; font-weight: 700; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
-  .step-box.active { border-color: var(--green); color: #fff; background: rgba(16,185,129,0.08); }
-  .s-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-muted); }
-  .step-box.active .s-dot { background: var(--green); }
 
   .table-container { flex: 1; overflow-y: auto; }
   table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
@@ -255,13 +234,13 @@ const terminalHTML = `<!DOCTYPE html>
   .dr-leg { color: var(--red); font-weight: 700; }
   .cr-leg { color: var(--green); font-weight: 700; }
 
-  .split-drawer { display: grid; grid-template-columns: 1fr 1fr; height: 210px; border-top: 1px solid var(--border); background: var(--bg-surface); flex-shrink: 0; }
-  .drawer-col { display: flex; flex-direction: column; padding: 8px 12px; overflow: hidden; }
+  .split-drawer { display: grid; grid-template-columns: 1fr 1fr; height: 200px; border-top: 1px solid var(--border); background: var(--bg-surface); flex-shrink: 0; }
+  .drawer-col { display: flex; flex-direction: column; padding: 8px 10px; overflow: hidden; }
   .drawer-col:first-child { border-right: 1px solid var(--border); }
-  .drawer-hdr { font-family: var(--mono); font-size: 9px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
-  .code-block { flex: 1; background: #020617; border: 1px solid var(--border); border-radius: 3px; padding: 8px; font-family: var(--mono); font-size: 10px; color: #38bdf8; overflow: auto; white-space: pre; line-height: 1.3; }
+  .drawer-hdr { font-size: 9px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
+  .code-block { flex: 1; background: #020408; border: 1px solid var(--border); border-radius: 2px; padding: 7px; font-family: var(--mono); font-size: 10px; color: var(--cyan); overflow: auto; white-space: pre; line-height: 1.3; }
 
-  #toast { display: none; position: fixed; bottom: 16px; right: 16px; background: var(--bg-card); border: 1px solid var(--accent); color: #fff; font-family: var(--mono); font-size: 10px; padding: 8px 14px; border-radius: 3px; z-index: 99; }
+  #toast { display: none; position: fixed; bottom: 14px; right: 14px; background: var(--bg-card); border: 1px solid var(--border-accent); color: #fff; font-family: var(--mono); font-size: 10px; padding: 7px 12px; border-radius: 2px; z-index: 99; }
 </style>
 </head>
 <body>
@@ -271,7 +250,7 @@ const terminalHTML = `<!DOCTYPE html>
     <span>FINACLE TREASURY // STRIPE LEDGER CORE</span>
     <span class="tag">PostgreSQL 16 ACID</span>
   </div>
-  <div style="font-family: var(--mono); font-size: 10px; color: var(--text-muted);">
+  <div style="font-size: 10px; color: var(--text-muted);">
     Node: tbg-core-01 • Redis Lua Lien Engine • pacs.008 Clearing
   </div>
 </header>
@@ -282,20 +261,20 @@ const terminalHTML = `<!DOCTYPE html>
     <div class="metric-val" id="txtFloat">INR 0.00</div>
   </div>
   <div class="metric-box">
-    <div class="metric-label">CMS Suspense Clearing</div>
+    <div class="metric-label">CMS Suspense Net Liability</div>
     <div class="metric-val" id="txtSuspense" style="color: var(--cyan);">INR 0.00</div>
   </div>
   <div class="metric-box">
     <div class="metric-label">Clearing Rail Mode</div>
-    <div class="metric-val" style="color: var(--amber);">NEFT / RTGS</div>
+    <div class="metric-val" style="color: var(--amber);">NEFT / RTGS (SFMS)</div>
   </div>
   <div class="metric-box">
     <div class="metric-label">P99 Engine Latency</div>
     <div class="metric-val" style="color: var(--green);"><span id="txtLatency">1.05</span> ms</div>
   </div>
   <div class="metric-box">
-    <div class="metric-label">Balanced Postings</div>
-    <div class="metric-val" id="txtCount">0</div>
+    <div class="metric-label">Audited Postings</div>
+    <div class="metric-val" id="txtCount">0 Entries</div>
   </div>
 </div>
 
@@ -303,7 +282,7 @@ const terminalHTML = `<!DOCTYPE html>
   <div class="rail-panel">
     <div class="panel-hdr">Payment Rail Dispatcher</div>
     <div class="form-row">
-      <label>Originating Float Account</label>
+      <label>Debit Float Account</label>
       <input type="text" class="inp" id="inpCorpAcc" value="00040310001928" readonly>
     </div>
     <div class="form-row">
@@ -342,18 +321,11 @@ const terminalHTML = `<!DOCTYPE html>
   <div class="main-canvas">
     <div class="canvas-nav">
       <button class="nav-btn active" onclick="switchNav('AUDIT', this)">Postings Ledger</button>
+      <button class="nav-btn" onclick="switchNav('TACCOUNTS', this)">T-Account Balance Sheet</button>
       <button class="nav-btn" onclick="switchNav('ACCOUNTS', this)">Chart of Accounts Master</button>
     </div>
 
     <div class="tab-view active" id="viewAUDIT">
-      <div class="pipeline-bar">
-        <div class="step-box" id="s1"><div class="s-dot"></div> 1. IDEMPOTENCY</div>
-        <div class="step-box" id="s2"><div class="s-dot"></div> 2. LIEN_HELD</div>
-        <div class="step-box" id="s3"><div class="s-dot"></div> 3. JOURNAL_POSTED</div>
-        <div class="step-box" id="s4"><div class="s-dot"></div> 4. ISO20022_PACS008</div>
-        <div class="step-box" id="s5"><div class="s-dot"></div> 5. SETTLED</div>
-      </div>
-
       <div class="table-container">
         <table>
           <thead>
@@ -364,7 +336,7 @@ const terminalHTML = `<!DOCTYPE html>
               <th>Account Identifier</th>
               <th>Leg</th>
               <th>Amount (INR)</th>
-              <th>Zero-Sum Invariant</th>
+              <th>Audit Verdict</th>
             </tr>
           </thead>
           <tbody id="ledgerTbody"></tbody>
@@ -389,7 +361,50 @@ const terminalHTML = `<!DOCTYPE html>
       </div>
     </div>
 
-    <div class="tab-view" id="viewACCOUNTS" style="padding: 14px; overflow-y: auto;">
+    <div class="tab-view" id="viewTACCOUNTS" style="padding: 12px; overflow-y: auto;">
+      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div style="border: 1px solid var(--border); background: var(--bg-surface); padding: 10px; border-radius: 2px;">
+          <div style="color: var(--amber); font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 6px;">
+            00040310001928 (Corporate Operating Float - Liability)
+          </div>
+          <table style="width:100%;">
+            <thead>
+              <tr style="color:var(--text-muted); border-bottom:1px solid var(--border);">
+                <th>DEBIT (Outflows)</th>
+                <th>CREDIT (Initial Float)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="color:var(--red); padding-top:4px;" id="taccDebitFloat">INR 0.00</td>
+                <td style="color:var(--green); padding-top:4px;">INR 1,00,00,000.00</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="border: 1px solid var(--border); background: var(--bg-surface); padding: 10px; border-radius: 2px;">
+          <div style="color: var(--cyan); font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 6px;">
+            AC_CMS_SUSPENSE_CLEARING_9999 (Intraday Suspense)
+          </div>
+          <table style="width:100%;">
+            <thead>
+              <tr style="color:var(--text-muted); border-bottom:1px solid var(--border);">
+                <th>DEBIT (Settled Nostro)</th>
+                <th>CREDIT (Accumulated CMS)</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="color:var(--red); padding-top:4px;" id="taccNostroDebit">INR 0.00</td>
+                <td style="color:var(--green); padding-top:4px;" id="taccSuspenseCredit">INR 0.00</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-view" id="viewACCOUNTS" style="padding: 12px; overflow-y: auto;">
       <table>
         <thead>
           <tr>
@@ -447,14 +462,6 @@ const terminalHTML = `<!DOCTYPE html>
     btn.classList.add("active");
   }
 
-  function setStep(step) {
-    for (var i = 1; i <= 5; i++) {
-      var el = document.getElementById("s" + i);
-      if (i <= step) el.classList.add("active");
-      else el.classList.remove("active");
-    }
-  }
-
   function generateNewIdemp() {
     document.getElementById("inpIdemp").value = "TXN-" + Date.now().toString().slice(-8);
   }
@@ -476,7 +483,10 @@ const terminalHTML = `<!DOCTYPE html>
 
       document.getElementById("txtSuspense").innerText = "INR " + suspense.toLocaleString("en-IN", {minimumFractionDigits: 2});
       document.getElementById("txtFloat").innerText = "INR " + avail.toLocaleString("en-IN", {minimumFractionDigits: 2});
-      document.getElementById("txtCount").innerText = data.postings ? data.postings.length : 0;
+      document.getElementById("txtCount").innerText = (data.postings ? data.postings.length : 0) + " Entries";
+
+      document.getElementById("taccDebitFloat").innerText = "INR " + suspense.toLocaleString("en-IN", {minimumFractionDigits: 2});
+      document.getElementById("taccSuspenseCredit").innerText = "INR " + suspense.toLocaleString("en-IN", {minimumFractionDigits: 2});
 
       cachedPostings = data.postings || [];
       renderTable(cachedPostings);
@@ -500,7 +510,7 @@ const terminalHTML = `<!DOCTYPE html>
           '<td><code>' + p.account_id + '</code></td>' +
           '<td><span class="' + (p.direction === "DR" ? "dr-leg" : "cr-leg") + '">' + p.direction + '</span></td>' +
           '<td><b>INR ' + Number(p.amount).toLocaleString('en-IN', {minimumFractionDigits: 2}) + '</b></td>' +
-          '<td><span style="color:var(--green);">✓ Zero-Sum Passed</span></td>' +
+          '<td><span style="color:var(--green);">✓ ZERO-SUM OK</span></td>' +
         '</tr>';
       });
     } else {
@@ -552,9 +562,7 @@ const terminalHTML = `<!DOCTYPE html>
     var amt = parseFloat(document.getElementById("inpAmount").value);
     var rail = document.getElementById("inpRail").value;
 
-    setStep(1);
     var t0 = performance.now();
-
     var payload = {
       corporate_account: document.getElementById("inpCorpAcc").value,
       amount: amt,
@@ -565,8 +573,6 @@ const terminalHTML = `<!DOCTYPE html>
       beneficiary_ifsc: document.getElementById("inpIfsc").value,
       reference_id: "REF-" + Date.now().toString().slice(-8)
     };
-
-    setTimeout(function() { setStep(2); }, 60);
 
     try {
       var res = await fetch("/api/v1/cms/payout", {
@@ -582,17 +588,14 @@ const terminalHTML = `<!DOCTYPE html>
       document.getElementById("txtLatency").innerText = elapsed;
 
       if(res.ok) {
-        setStep(5);
         showToast("Settled! UTR: " + data.utr + " (" + elapsed + "ms)");
         generateNewIdemp();
         refreshData();
         inspectVoucher(data.jv_id, payload.amount);
       } else {
-        setStep(0);
         showToast(data.error || "Payout rejected by ledger");
       }
     } catch(err) {
-      setStep(0);
       showToast("Engine Connection Error");
     }
   }
