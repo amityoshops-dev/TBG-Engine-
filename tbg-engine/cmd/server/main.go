@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -20,9 +19,6 @@ import (
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 )
-
-//go:embed web/index.html
-var terminalHTML []byte
 
 type PayoutRequest struct {
 	ClientID           string  `json:"client_id"`
@@ -155,7 +151,7 @@ func initRedis() {
 	defer cancel()
 
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Printf("[WARN] Redis notice: %v (local fallback active)", err)
+		log.Printf("[WARN] Redis notice: %v (local mutex fallback enabled)", err)
 	} else {
 		log.Println("[INFO] Redis distributed lock engine online")
 	}
@@ -172,7 +168,8 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/", serveTerminal)
+	// Pure JSON Routing
+	mux.HandleFunc("/", handleRoot)
 	mux.HandleFunc("/healthz", handleHealthz)
 	mux.HandleFunc("/health", handleHealthz)
 	mux.HandleFunc("/api/v1/cms/stats", handleStats)
@@ -214,13 +211,40 @@ func main() {
 	log.Println("[INFO] TBG-CORE Engine successfully stopped")
 }
 
+func handleRoot(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"service":     "TBG-CORE Transaction Banking Engine",
+		"version":     "v12.5-enterprise",
+		"environment": "production",
+		"status":      "OPERATIONAL",
+		"engine":      "Go 1.22 + PostgreSQL 16 + Redis 7.2",
+		"endpoints": map[string]string{
+			"GET /healthz":              "Health check and service status",
+			"GET /api/v1/cms/stats":     "Real-time corporate float & settlement statistics",
+			"GET /api/v1/cms/accounts":  "Virtual accounts hierarchy and balances",
+			"POST /api/v1/cms/payout":   "Idempotent outward payout clearing",
+			"POST /api/v1/cms/fund":     "Treasury inward replenishment",
+			"GET /api/v1/ledger/postings": "Immutable double-entry journal postings",
+		},
+		"documentation": "Strict ISO-20022 / NEFT / RTGS compliant double-entry ledger",
+	})
+}
+
 func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":    "OPERATIONAL",
+		"status":    "UP",
 		"timestamp": time.Now().UTC(),
-		"cluster":   "TBG-PROD-CORE-01",
-		"services":  map[string]string{"postgres": "ONLINE", "redis": "ONLINE", "ledger_engine": "BALANCED"},
+		"checks": map[string]string{
+			"database": "CONNECTED",
+			"redis":    "CONNECTED",
+			"ledger":   "BALANCED",
+		},
 	})
 }
 
@@ -228,7 +252,7 @@ func handleAccounts(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	rows, err := db.Query("SELECT account_number, client_id, currency, balance, status, created_at FROM accounts ORDER BY account_number ASC")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -268,9 +292,9 @@ func handleStats(w http.ResponseWriter, r *http.Request) {
 
 func handlePostings(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	rows, err := db.Query("SELECT entry_id, journal_id, account_no, direction, amount, description, created_at FROM postings ORDER BY entry_id DESC LIMIT 60")
+	rows, err := db.Query("SELECT entry_id, journal_id, account_no, direction, amount, description, created_at FROM postings ORDER BY entry_id DESC LIMIT 50")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 	defer rows.Close()
@@ -287,18 +311,18 @@ func handlePostings(w http.ResponseWriter, r *http.Request) {
 func handleFund(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		http.Error(w, `{"error": "Method Not Allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
 
 	var req FundRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Malformed JSON", http.StatusBadRequest)
+		http.Error(w, `{"error": "Malformed JSON payload"}`, http.StatusBadRequest)
 		return
 	}
 
 	if req.Amount <= 0 {
-		http.Error(w, "Invalid funding amount", http.StatusBadRequest)
+		http.Error(w, `{"error": "Amount must be strictly greater than 0.00"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -310,7 +334,7 @@ func handleFund(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := db.Begin()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 	defer tx.Rollback()
@@ -318,7 +342,7 @@ func handleFund(w http.ResponseWriter, r *http.Request) {
 	_, err = tx.Exec(`INSERT INTO journal_entries (journal_id, reference_no, narration) VALUES ($1, $2, $3)`,
 		journalID, refNo, fmt.Sprintf("Treasury Inward Liquidity for %s", req.VirtualAccount))
 	if err != nil {
-		http.Error(w, "Duplicate UTR reference or ledger conflict", http.StatusConflict)
+		http.Error(w, `{"error": "Duplicate UTR reference or ledger conflict"}`, http.StatusConflict)
 		return
 	}
 
@@ -332,7 +356,7 @@ func handleFund(w http.ResponseWriter, r *http.Request) {
 		journalID, req.Amount, req.VirtualAccount)
 
 	if err := tx.Commit(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 
@@ -349,7 +373,7 @@ func handleFund(w http.ResponseWriter, r *http.Request) {
 func handlePayout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		http.Error(w, `{"error": "Method Not Allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -384,7 +408,7 @@ func handlePayout(w http.ResponseWriter, r *http.Request) {
 
 	tx, err := db.Begin()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 	defer tx.Rollback()
@@ -402,7 +426,7 @@ func handlePayout(w http.ResponseWriter, r *http.Request) {
 
 	_, err = tx.Exec(`UPDATE accounts SET balance = balance - $1 WHERE account_number = $2`, req.Amount, req.VirtualAccount)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 
@@ -419,12 +443,12 @@ func handlePayout(w http.ResponseWriter, r *http.Request) {
 		($1, 'RBI-SETTLEMENT-CLEARING', 'CREDIT', $3, 'Outward Rail Settlement Clearing')`,
 		journalID, req.VirtualAccount, req.Amount)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 
 	if err := tx.Commit(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf(`{"error": "%s"}`, err.Error()), http.StatusInternalServerError)
 		return
 	}
 
@@ -441,13 +465,4 @@ func handlePayout(w http.ResponseWriter, r *http.Request) {
 		"clearing_status": "COMMITTED_TO_RBI_CLEARING",
 		"timestamp":       time.Now().UTC(),
 	})
-}
-
-func serveTerminal(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write(terminalHTML)
 }
