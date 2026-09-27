@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -213,10 +212,10 @@ func main() {
 func handleHealthz(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":    "OPERATIONAL",
-		"timestamp": time.Now().UTC(),
-		"cluster":   "TBG-PROD-CORE-01",
-		"services":  map[string]string{"postgres": "ONLINE", "redis": "ONLINE", "ledger_engine": "BALANCED"},
+		"status":      "OPERATIONAL",
+		"timestamp":   time.Now().UTC(),
+		"cluster":     "TBG-PROD-CORE-01",
+		"services":    map[string]string{"postgres": "ONLINE", "redis": "ONLINE", "ledger_engine": "BALANCED"},
 	})
 }
 
@@ -345,7 +344,7 @@ func handleFund(w http.ResponseWriter, r *http.Request) {
 func handlePayout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if r.Method != http.MethodPost {
-		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
+		http.Error(w, `{"error": "Method Not Allowed"}`, http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -799,17 +798,17 @@ const terminalHTML = `<!DOCTYPE html>
     cachedPostings.forEach(function(p) {
       csv += p.entry_id + ',"' + p.timestamp + '","' + p.journal_id + '","' + p.account_no + '","' + p.direction + '",' + p.amount + ',"' + p.description + '"\n';
     });
-    var blob = new Blob([csv], { type: "text/csv" });
-    var url = window.URL.createObjectURL(blob);
-    var a = document.createElement("a");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
     a.href = url;
     a.download = "TBG_Ledger_" + Date.now() + ".csv";
     a.click();
   }
 
   async function submitPayout() {
-    var idemp = document.getElementById("inpIdemp").value;
-    var payload = {
+    const idemp = document.getElementById("inpIdemp").value;
+    const payload = {
       client_id: document.getElementById("inpClientId").value,
       virtual_account: document.getElementById("inpVaSelect").value,
       beneficiary_account: document.getElementById("inpBene").value,
@@ -819,7 +818,7 @@ const terminalHTML = `<!DOCTYPE html>
     };
 
     try {
-      var res = await fetch("/api/v1/cms/payout", {
+      const res = await fetch("/api/v1/cms/payout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -827,7 +826,7 @@ const terminalHTML = `<!DOCTYPE html>
         },
         body: JSON.stringify(payload)
       });
-      var data = await res.json();
+      const data = await res.json();
       if(res.ok) {
         showToast("Payout Settled: " + data.journal_id, false);
         generateNewIdemp();
@@ -841,8 +840,8 @@ const terminalHTML = `<!DOCTYPE html>
   }
 
   async function submitFunding() {
-    var targetVa = document.getElementById("inpFundTarget").value;
-    var payload = {
+    const targetVa = document.getElementById("inpFundTarget").value;
+    const payload = {
       client_id: targetVa.startsWith("VA8800112244") ? "CORP-CLIENT-002" : "CORP-CLIENT-001",
       virtual_account: targetVa,
       amount: parseFloat(document.getElementById("inpFundAmt").value),
@@ -850,12 +849,12 @@ const terminalHTML = `<!DOCTYPE html>
     };
 
     try {
-      var res = await fetch("/api/v1/cms/fund", {
+      const res = await fetch("/api/v1/cms/fund", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
       });
-      var data = await res.json();
+      const data = await res.json();
       if(res.ok) {
         showToast("Float Credited: ₹" + payload.amount.toLocaleString(), false);
         refreshData();
