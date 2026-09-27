@@ -28,220 +28,286 @@ var portalTmpl = template.Must(template.New("portal").Parse(`<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TBG-CORE | Transaction Banking Portal</title>
+<title>TBG-CORE | Institutional Transaction Banking Terminal</title>
 <style>
   :root[data-theme="dark"] {
-    --bg: #090d16; --surface: #111827; --panel: #162032; --border: #1f293d;
-    --accent: #0284c7; --accent-hover: #0369a1; --accent-glow: rgba(14, 165, 233, 0.2);
-    --green: #10b981; --red: #ef4444; --yellow: #f59e0b;
-    --text: #f1f5f9; --muted: #94a3b8; --input-bg: #0b1120;
-    --badge-bg: #0369a1; --table-header: #131d31; --card-val: #ffffff;
+    --bg: #06090e; --surface: #0c111c; --panel: #111827; --panel-border: #1e293b;
+    --accent: #0284c7; --accent-glow: rgba(2, 132, 199, 0.25);
+    --green: #10b981; --red: #ef4444; --yellow: #f59e0b; --purple: #a855f7;
+    --text: #f1f5f9; --text-muted: #64748b; --code-bg: #040711;
   }
   :root[data-theme="light"] {
-    --bg: #f8fafc; --surface: #ffffff; --panel: #f1f5f9; --border: #cbd5e1;
-    --accent: #0284c7; --accent-hover: #0369a1; --accent-glow: rgba(2, 132, 199, 0.2);
-    --green: #059669; --red: #dc2626; --yellow: #d97706;
-    --text: #0f172a; --muted: #64748b; --input-bg: #ffffff;
-    --badge-bg: #e0f2fe; --table-header: #e2e8f0; --card-val: #0f172a;
+    --bg: #f8fafc; --surface: #ffffff; --panel: #f1f5f9; --panel-border: #cbd5e1;
+    --accent: #0284c7; --accent-glow: rgba(2, 132, 199, 0.15);
+    --green: #059669; --red: #dc2626; --yellow: #d97706; --purple: #9333ea;
+    --text: #0f172a; --text-muted: #64748b; --code-bg: #e2e8f0;
   }
-  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "JetBrains Mono", "Segoe UI", monospace; transition: background 0.15s, color 0.15s; }
-  body { background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 13px; }
-  header { height: 50px; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
-  .brand { font-size: 14px; font-weight: 800; color: #38bdf8; display: flex; align-items: center; gap: 8px; letter-spacing: 0.5px; }
-  .badge { background: var(--badge-bg); color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; }
-  :root[data-theme="light"] .badge { color: #0369a1; border: 1px solid #bae6fd; }
-  .nav-right { display: flex; align-items: center; gap: 12px; }
-  .theme-toggle { background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 700; }
-  .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); display: inline-block; margin-right: 4px; }
-  .tab-strip { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 16px; gap: 6px; }
-  .tab-btn { background: none; border: none; border-bottom: 2px solid transparent; color: var(--muted); padding: 10px 14px; font-size: 12px; font-weight: 700; cursor: pointer; }
-  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .ribbon { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
-  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; }
-  .card-label { font-size: 10px; text-transform: uppercase; color: var(--muted); font-weight: 700; letter-spacing: 0.5px; }
-  .card-val { font-size: 18px; font-weight: 800; margin-top: 4px; color: var(--card-val); }
-  .view-container { display: flex; flex: 1; overflow: hidden; }
-  .view-panel { display: none; width: 100%; height: 100%; }
-  .view-panel.active { display: flex; }
-  .desk-left { width: 440px; background: var(--surface); border-right: 1px solid var(--border); padding: 18px; overflow-y: auto; }
-  .desk-right { flex: 1; background: var(--bg); display: flex; flex-direction: column; overflow: hidden; padding: 16px; }
-  .section-title { font-size: 11px; text-transform: uppercase; font-weight: 800; color: #38bdf8; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
-  .form-group { margin-bottom: 12px; }
-  .form-group label { display: block; font-size: 11px; color: var(--muted); margin-bottom: 4px; font-weight: 600; }
-  .form-group input, .form-group select { width: 100%; background: var(--input-bg); border: 1px solid var(--border); border-radius: 4px; color: var(--text); padding: 8px 10px; font-size: 12px; outline: none; }
-  .form-group input:focus, .form-group select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
-  .btn-action { width: 100%; background: var(--accent); color: #fff; border: none; padding: 11px; border-radius: 4px; font-weight: 700; cursor: pointer; font-size: 12px; }
-  .btn-action:hover { background: var(--accent-hover); }
-  .ledger-box { flex: 1; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
-  .ledger-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
-  .ledger-tbl th { background: var(--table-header); color: var(--muted); padding: 8px 12px; text-align: left; position: sticky; top: 0; font-size: 10px; text-transform: uppercase; border-bottom: 1px solid var(--border); z-index: 10; }
-  .ledger-tbl td { padding: 9px 12px; border-bottom: 1px solid var(--border); }
-  .debit-tag { color: var(--red); font-weight: 700; }
-  .credit-tag { color: var(--green); font-weight: 700; }
-  .ctrl-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 10px; }
-  .search-box { background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 6px 10px; border-radius: 4px; font-size: 11px; width: 260px; }
-  #toast { display: none; position: fixed; bottom: 20px; right: 20px; background: var(--surface); border: 1.5px solid var(--accent); color: var(--text); padding: 12px 18px; border-radius: 6px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); z-index: 99; font-size: 12px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "JetBrains Mono", "SF Mono", monospace; }
+  body { background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 12px; }
+
+  /* Header */
+  header { height: 46px; background: var(--surface); border-bottom: 1px solid var(--panel-border); display: flex; align-items: center; justify-content: space-between; padding: 0 16px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 13px; color: #38bdf8; letter-spacing: 0.5px; }
+  .badge { background: #0369a1; color: #fff; padding: 2px 7px; border-radius: 4px; font-size: 9px; font-weight: 700; }
+  .btn-theme { background: var(--panel); border: 1px solid var(--panel-border); color: var(--text); padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+
+  /* Architecture Telemetry Ribbon */
+  .telemetry-bar { background: var(--surface); border-bottom: 1px solid var(--panel-border); padding: 10px 16px; display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 14px; }
+  .telemetry-card { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; padding: 8px 12px; }
+  .telemetry-label { font-size: 9px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px; }
+  .telemetry-val { font-size: 16px; font-weight: 800; margin-top: 3px; display: flex; align-items: baseline; gap: 6px; }
+  .progress-bg { height: 6px; background: var(--panel-border); border-radius: 3px; margin-top: 6px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--green)); width: 100%; transition: width 0.3s; }
+
+  /* Workspace Layout */
+  .workspace { display: grid; grid-template-columns: 410px 1fr; height: calc(100vh - 120px); overflow: hidden; }
+
+  /* Left Panel: Payout Console */
+  .payout-console { background: var(--surface); border-right: 1px solid var(--panel-border); padding: 16px; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; }
+  .pane-title { font-size: 11px; text-transform: uppercase; font-weight: 800; color: #38bdf8; display: flex; justify-content: space-between; align-items: center; }
+  .form-group { display: flex; flex-direction: column; gap: 4px; }
+  .form-group label { font-size: 10px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; }
+  .form-control { background: var(--bg); border: 1px solid var(--panel-border); border-radius: 4px; color: var(--text); padding: 7px 10px; font-size: 11px; outline: none; }
+  .form-control:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+  .btn-dispatch { background: var(--accent); color: #fff; border: none; padding: 10px; border-radius: 4px; font-weight: 700; font-size: 11px; cursor: pointer; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 4px; }
+  .btn-dispatch:hover { background: #0369a1; }
+
+  /* Lifecycle Pipeline Tracker */
+  .pipeline-card { background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; padding: 10px; margin-top: 6px; }
+  .pipeline-step { display: flex; align-items: center; gap: 8px; font-size: 10px; padding: 3px 0; color: var(--text-muted); }
+  .pipeline-step.active { color: var(--green); font-weight: 700; }
+  .pipeline-step.active .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-muted); }
+
+  /* Right Panel: Cockpit */
+  .cockpit { background: var(--bg); display: flex; flex-direction: column; overflow: hidden; padding: 14px; gap: 12px; }
+  .cockpit-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--panel-border); padding-bottom: 8px; }
+  .tab-btn { background: none; border: none; color: var(--text-muted); font-weight: 700; font-size: 11px; cursor: pointer; padding: 4px 10px; border-radius: 4px; }
+  .tab-btn.active { background: var(--panel); color: var(--accent); }
+
+  .cockpit-view { flex: 1; display: none; overflow: hidden; flex-direction: column; background: var(--surface); border: 1px solid var(--panel-border); border-radius: 6px; }
+  .cockpit-view.active { display: flex; }
+
+  /* Ledger Table */
+  .table-box { flex: 1; overflow-y: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th { background: var(--panel); color: var(--text-muted); padding: 7px 10px; text-align: left; font-size: 9px; text-transform: uppercase; position: sticky; top: 0; border-bottom: 1px solid var(--panel-border); z-index: 10; }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--panel-border); }
+  tr:hover { background: var(--panel); cursor: pointer; }
+  .badge-dr { color: var(--red); font-weight: 700; }
+  .badge-cr { color: var(--green); font-weight: 700; }
+
+  /* Wire Inspector Drawer */
+  .drawer { height: 210px; background: var(--surface); border-top: 1px solid var(--panel-border); padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; }
+  .drawer-head { display: flex; justify-content: space-between; align-items: center; font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
+  .code-viewer { flex: 1; background: var(--code-bg); border: 1px solid var(--panel-border); border-radius: 4px; padding: 8px; overflow: auto; font-size: 10px; color: #38bdf8; white-space: pre; }
+
+  /* Toast Notification */
+  #toast { display: none; position: fixed; bottom: 20px; right: 20px; background: var(--surface); border: 1px solid var(--accent); color: var(--text); padding: 10px 16px; border-radius: 4px; font-size: 11px; z-index: 99; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
 </style>
 </head>
 <body>
 
 <header>
   <div class="brand">
-    <span>⚡ TBG-CORE TRANSACTION BANKING ENGINE</span>
+    <span>⚡ TBG-CORE INSTITUTIONAL TRANSACTION BANKING TERMINAL</span>
     <span class="badge">PROD-ACID</span>
   </div>
-  <div class="nav-right">
-    <span style="font-size:11px; color:var(--muted);"><span class="live-dot"></span>PostgreSQL 16 • Redis 7.2 • ISO-20022</span>
-    <button class="theme-toggle" onclick="toggleTheme()">☀️ / 🌙 Theme</button>
+  <div style="display:flex; align-items:center; gap:12px;">
+    <span style="font-size:10px; color:var(--text-muted);">● Engine: PostgreSQL 16 • Redis 7.2 • ISO-20022 Clearing Rail</span>
+    <button class="btn-theme" onclick="toggleTheme()">☀️ / 🌙 Mode</button>
   </div>
 </header>
 
-<div class="tab-strip">
-  <button class="tab-btn active" onclick="switchView('WORKSTATION', this)">Payouts & Live Ledger</button>
-  <button class="tab-btn" onclick="switchView('ACCOUNTS', this)">Ledger Accounts Position</button>
-  <button class="tab-btn" onclick="switchView('TELEMETRY', this)">System Health & Nodes</button>
+<div class="telemetry-bar">
+  <div class="telemetry-card">
+    <div class="telemetry-label">Corporate Float Liquidity (00040310001928)</div>
+    <div class="telemetry-val">
+      <span id="txtAvailFloat" style="color:var(--green);">₹9,975,000.00</span>
+      <span style="font-size:10px; color:var(--text-muted);">/ ₹10,000,000.00 Pool</span>
+    </div>
+    <div class="progress-bg"><div class="progress-fill" id="floatBar" style="width: 99.75%;"></div></div>
+  </div>
+  <div class="telemetry-card">
+    <div class="telemetry-label">CMS Intraday Suspense (CR)</div>
+    <div class="telemetry-val" id="txtSuspense" style="color:var(--accent);">₹25,000.00</div>
+    <div style="font-size:9px; color:var(--text-muted); margin-top:4px;">AC_CMS_SUSPENSE_CLEARING_9999</div>
+  </div>
+  <div class="telemetry-card">
+    <div class="telemetry-label">Clearing Rail Latency</div>
+    <div class="telemetry-val" style="color:var(--yellow);"><span id="txtLatency">1.12</span> <span style="font-size:10px;">ms (P99)</span></div>
+    <div style="font-size:9px; color:var(--text-muted); margin-top:4px;">Lock-Free Lua Engine</div>
+  </div>
+  <div class="telemetry-card">
+    <div class="telemetry-label">Audited Vouchers</div>
+    <div class="telemetry-val" id="txtPostingsCount">2</div>
+    <div style="font-size:9px; color:var(--text-muted); margin-top:4px;">Merkle Linked & Zero-Sum Verified</div>
+  </div>
 </div>
 
-<div class="ribbon">
-  <div class="card">
-    <div class="card-label">Corporate Float Account</div>
-    <div class="card-val" id="valCorpAcc">00040310001928</div>
-  </div>
-  <div class="card">
-    <div class="card-label">CMS Suspense Balance (CR)</div>
-    <div class="card-val" id="valSuspense">₹0.00</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Settlement Clearing Rail</div>
-    <div class="card-val" style="color:var(--accent);">NEFT / RTGS</div>
-  </div>
-  <div class="card">
-    <div class="card-label">Total Ledger Postings</div>
-    <div class="card-val" id="valPostingsCount">0</div>
-  </div>
-</div>
-
-<div class="view-container">
-  <div class="view-panel active" id="viewWORKSTATION">
-    <div class="desk-left">
-      <div class="section-title">
-        <span>CMS Outward Payout Dispatch</span>
-        <span style="font-size:10px; color:var(--muted);">Rail: NEFT / RTGS</span>
-      </div>
-      <div class="form-group">
-        <label>Debit Corporate Account:</label>
-        <input type="text" id="inpCorpAcc" value="00040310001928" readonly>
-      </div>
-      <div class="form-group">
-        <label>Beneficiary Legal Name:</label>
-        <input type="text" id="inpBeneName" value="Tata Motors Fleet Ltd">
-      </div>
-      <div class="form-group">
-        <label>Beneficiary Account Number:</label>
-        <input type="text" id="inpBeneAcct" value="912345678901">
-      </div>
-      <div class="form-group">
-        <label>Beneficiary IFSC Code:</label>
-        <input type="text" id="inpIfsc" value="HDFC0000001">
-      </div>
-      <div class="form-group">
-        <label>Payout Amount (₹):</label>
-        <input type="number" id="inpAmount" value="25000.00" step="500">
-      </div>
-      <div class="form-group">
-        <label>Payment Rail:</label>
-        <select id="inpRail">
-          <option value="NEFT">NEFT (National Electronic Fund Transfer)</option>
-          <option value="RTGS">RTGS (Real Time Gross Settlement)</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Idempotency Key (Distributed Safe):</label>
-        <input type="text" id="inpIdemp" value="TXN-DEMO-001">
-      </div>
-      <button class="btn-action" onclick="submitPayout()">EXECUTE IDEMPOTENT PAYOUT</button>
+<div class="workspace">
+  <!-- Left Console: Payout Dispatcher & Pipeline -->
+  <div class="payout-console">
+    <div class="pane-title">
+      <span>CMS Outward Settlement Rail</span>
+      <span style="font-size:9px; color:var(--text-muted);">pacs.008 Dispatcher</span>
     </div>
 
-    <div class="desk-right">
-      <div class="ctrl-bar">
-        <div class="section-title" style="margin:0;">Real-Time Postings Ledger</div>
-        <div style="display:flex; gap:8px;">
-          <input type="text" class="search-box" id="inpLedgerSearch" placeholder="Filter by Account or JV..." oninput="filterLedger()">
-          <button class="theme-toggle" onclick="exportLedgerCSV()">Export CSV</button>
-          <button class="theme-toggle" onclick="refreshData()">⟳ Refresh</button>
-        </div>
-      </div>
-      <div class="ledger-box">
-        <table class="ledger-tbl">
+    <div class="form-group">
+      <label>Originating Corporate Account</label>
+      <input type="text" class="form-control" id="inpCorpAcc" value="00040310001928" readonly>
+    </div>
+    <div class="form-group">
+      <label>Beneficiary Legal Entity</label>
+      <input type="text" class="form-control" id="inpBeneName" value="Tata Motors Fleet Ltd">
+    </div>
+    <div class="form-group">
+      <label>Beneficiary Account Number</label>
+      <input type="text" class="form-control" id="inpBeneAcct" value="912345678901">
+    </div>
+    <div class="form-group">
+      <label>Beneficiary IFSC Code</label>
+      <input type="text" class="form-control" id="inpIfsc" value="HDFC0000001">
+    </div>
+    <div class="form-group">
+      <label>Payout Amount (₹)</label>
+      <input type="number" class="form-control" id="inpAmount" value="25000.00" step="500">
+    </div>
+    <div class="form-group">
+      <label>Clearing Rail Protocol</label>
+      <select class="form-control" id="inpRail">
+        <option value="NEFT">NEFT (National Electronic Fund Transfer)</option>
+        <option value="RTGS">RTGS (Real Time Gross Settlement)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>Distributed Idempotency Key</label>
+      <input type="text" class="form-control" id="inpIdemp" value="TXN-DEMO-001">
+    </div>
+
+    <button class="btn-dispatch" onclick="submitPayout()">EXECUTE IDEMPOTENT PAYOUT</button>
+
+    <div class="pipeline-card">
+      <div style="font-size:9px; text-transform:uppercase; color:var(--text-muted); font-weight:700; margin-bottom:6px;">Clearing State Pipeline</div>
+      <div class="pipeline-step" id="step1"><div class="dot"></div> 1. INITIATED (Idempotency Locked)</div>
+      <div class="pipeline-step" id="step2"><div class="dot"></div> 2. LIEN_HELD (Redis Atomic Float Hold)</div>
+      <div class="pipeline-step" id="step3"><div class="dot"></div> 3. JOURNAL_POSTED (PostgreSQL Zero-Sum)</div>
+      <div class="pipeline-step" id="step4"><div class="dot"></div> 4. ISO20022_EMITTED (pacs.008 Generated)</div>
+      <div class="pipeline-step" id="step5"><div class="dot"></div> 5. SETTLED (Lien Released Permanently)</div>
+    </div>
+  </div>
+
+  <!-- Right Cockpit: Postings Feed, Balance Sheet, ISO XML -->
+  <div class="cockpit">
+    <div class="cockpit-tabs">
+      <button class="tab-btn active" onclick="switchCockpit('POSTINGS', this)">Live Postings Feed</button>
+      <button class="tab-btn" onclick="switchCockpit('ACCOUNTS', this)">Chart of Accounts</button>
+      <button class="tab-btn" onclick="switchCockpit('TOPUP', this)">Treasury Float Replenish</button>
+    </div>
+
+    <!-- VIEW 1: Postings Table -->
+    <div class="cockpit-view active" id="viewPOSTINGS">
+      <div class="table-box">
+        <table>
           <thead>
             <tr>
-              <th>Posting ID</th>
-              <th>Created At</th>
+              <th>ID</th>
+              <th>Timestamp</th>
               <th>Journal Voucher (JV ID)</th>
-              <th>Account Number</th>
-              <th>Direction</th>
+              <th>Account Identifier</th>
+              <th>Leg</th>
               <th>Amount (₹)</th>
+              <th>Action</th>
             </tr>
           </thead>
           <tbody id="ledgerTbody"></tbody>
         </table>
       </div>
-    </div>
-  </div>
 
-  <div class="view-panel" id="viewACCOUNTS" style="padding:20px; overflow-y:auto; flex-direction:column;">
-    <div class="section-title">Core Banking Chart of Accounts (init.sql)</div>
-    <div class="ledger-box">
-      <table class="ledger-tbl">
+      <!-- Drawer: Live Wire & ISO 20022 Viewer -->
+      <div class="drawer">
+        <div class="drawer-head">
+          <span>Target ISO 20022 pacs.008.001.08 XML Wire Message & Hash Chain</span>
+          <button class="btn-theme" style="padding:2px 8px; font-size:9px;" onclick="copyWireXML()">Copy Wire XML</button>
+        </div>
+        <div class="code-viewer" id="txtWireCode">&lt;?xml version="1.0" encoding="UTF-8"?&gt;
+&lt;Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08"&gt;
+  &lt;FIToFICstmrCdtTrf&gt;
+    &lt;GrpHdr&gt;
+      &lt;MsgId&gt;MSG-5bea4eb5&lt;/MsgId&gt;
+      &lt;CreDtTm&gt;2026-09-27T15:28:13Z&lt;/CreDtTm&gt;
+      &lt;NbOfTxs&gt;1&lt;/NbOfTxs&gt;
+      &lt;SttlmInf&gt;&lt;SttlmMtd&gt;CLRG&lt;/SttlmMtd&gt;&lt;/SttlmInf&gt;
+    &lt;/GrpHdr&gt;
+    &lt;CdtTrfTxInf&gt;
+      &lt;PmtId&gt;&lt;EndToEndId&gt;REF-PAYOUT-001&lt;/EndToEndId&gt;&lt;Utr&gt;CMSNEFT8891230491&lt;/Utr&gt;&lt;/PmtId&gt;
+      &lt;IntrBkSttlmAmt Ccy="INR"&gt;25000.00&lt;/IntrBkSttlmAmt&gt;
+      &lt;Dbtr&gt;&lt;Nm&gt;Corporate Operating Float Client&lt;/Nm&gt;&lt;/Dbtr&gt;
+      &lt;DbtrAcct&gt;&lt;Id&gt;&lt;Othr&gt;&lt;Id&gt;00040310001928&lt;/Id&gt;&lt;/Othr&gt;&lt;/Id&gt;&lt;/DbtrAcct&gt;
+      &lt;CdtrAgt&gt;&lt;FinInstnId&gt;&lt;ClrSysMmbId&gt;&lt;MmbId&gt;HDFC0000001&lt;/MmbId&gt;&lt;/ClrSysMmbId&gt;&lt;/FinInstnId&gt;&lt;/CdtrAgt&gt;
+      &lt;Cdtr&gt;&lt;Nm&gt;Tata Motors Fleet Ltd&lt;/Nm&gt;&lt;/Cdtr&gt;
+      &lt;CdtrAcct&gt;&lt;Id&gt;&lt;Othr&gt;&lt;Id&gt;912345678901&lt;/Id&gt;&lt;/Othr&gt;&lt;/Id&gt;&lt;/CdtrAcct&gt;
+    &lt;/CdtTrfTxInf&gt;
+  &lt;/FIToFICstmrCdtTrf&gt;
+&lt;/Document&gt;</div>
+      </div>
+    </div>
+
+    <!-- VIEW 2: Chart of Accounts Position -->
+    <div class="cockpit-view" id="viewACCOUNTS" style="padding:16px;">
+      <table>
         <thead>
           <tr>
             <th>Account Identifier</th>
-            <th>Account Name / Purpose</th>
-            <th>Account Classification</th>
-            <th>Base Currency</th>
+            <th>Designation</th>
+            <th>Type</th>
+            <th>Currency</th>
+            <th>Balance Invariant</th>
           </tr>
         </thead>
         <tbody>
           <tr>
             <td><code>00040310001928</code></td>
-            <td><b>Corporate Operating Float (Demo Client)</b></td>
+            <td><b>Corporate Operating Float (Client Float)</b></td>
             <td><span style="color:var(--yellow); font-weight:700;">LIABILITY</span></td>
             <td>INR</td>
+            <td>DR Reduces / CR Increases</td>
           </tr>
           <tr>
             <td><code>AC_CMS_SUSPENSE_CLEARING_9999</code></td>
             <td><b>CMS Intraday Clearing Suspense</b></td>
             <td><span style="color:var(--accent); font-weight:700;">SUSPENSE</span></td>
             <td>INR</td>
+            <td>CR Accumulates Intraday Payouts</td>
           </tr>
           <tr>
             <td><code>AC_RBI_NOSTRO_0001</code></td>
             <td><b>Central Bank Settlement Nostro</b></td>
             <td><span style="color:var(--green); font-weight:700;">ASSET</span></td>
             <td>INR</td>
+            <td>End-of-Day Net Clearing Offset</td>
           </tr>
         </tbody>
       </table>
     </div>
-  </div>
 
-  <div class="view-panel" id="viewTELEMETRY" style="padding:24px; flex-direction:column; gap:16px;">
-    <div class="section-title">Core Infrastructure Telemetry</div>
-    <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:16px;">
-      <div class="card">
-        <div class="card-label">Relational Core</div>
-        <div class="card-val" style="color:var(--green);">PostgreSQL 16</div>
-        <div style="font-size:11px; color:var(--muted); margin-top:6px;">Zero-Sum Trigger: ACTIVE (Enforced)</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Distributed Lien Engine</div>
-        <div class="card-val" style="color:var(--green);">Redis 7.2 (Stack)</div>
-        <div style="font-size:11px; color:var(--muted); margin-top:6px;">Lock-Free Lua Scripts • 24h Idempotency TTL</div>
-      </div>
-      <div class="card">
-        <div class="card-label">Financial Messaging</div>
-        <div class="card-val" style="color:var(--accent);">ISO 20022 Engine</div>
-        <div style="font-size:11px; color:var(--muted); margin-top:6px;">pacs.008 Credit Transfer Serialization</div>
+    <!-- VIEW 3: Inward Treasury Replenish -->
+    <div class="cockpit-view" id="viewTOPUP" style="padding:16px;">
+      <div style="max-width:480px; display:flex; flex-direction:column; gap:10px;">
+        <div class="pane-title">Inward Treasury Liquidity Top-Up</div>
+        <div class="form-group">
+          <label>Target Account Number</label>
+          <input type="text" class="form-control" value="00040310001928" readonly>
+        </div>
+        <div class="form-group">
+          <label>Deposit Amount (₹)</label>
+          <input type="number" class="form-control" id="inpTopupAmt" value="500000.00" step="50000">
+        </div>
+        <div class="form-group">
+          <label>Bank Real-Time Gross Settlement UTR</label>
+          <input type="text" class="form-control" id="inpTopupUtr" placeholder="BANK-INW-778899">
+        </div>
+        <button class="btn-dispatch" style="background:var(--green);" onclick="submitFloatTopup()">EXECUTE INWARD REPLENISHMENT</button>
       </div>
     </div>
   </div>
@@ -250,7 +316,8 @@ var portalTmpl = template.Must(template.New("portal").Parse(`<!DOCTYPE html>
 <div id="toast"></div>
 
 <script>
-  var cachedPostings = [];
+  let cachedPostings = [];
+  const TOTAL_INITIAL_FLOAT = 10000000.00;
 
   window.onload = function() {
     initTheme();
@@ -260,20 +327,20 @@ var portalTmpl = template.Must(template.New("portal").Parse(`<!DOCTYPE html>
   };
 
   function initTheme() {
-    var saved = localStorage.getItem("tbg_theme") || "dark";
+    const saved = localStorage.getItem("tbg_theme") || "dark";
     document.documentElement.setAttribute("data-theme", saved);
   }
 
   function toggleTheme() {
-    var cur = document.documentElement.getAttribute("data-theme");
-    var nxt = cur === "dark" ? "light" : "dark";
+    const cur = document.documentElement.getAttribute("data-theme");
+    const nxt = cur === "dark" ? "light" : "dark";
     document.documentElement.setAttribute("data-theme", nxt);
     localStorage.setItem("tbg_theme", nxt);
   }
 
-  function switchView(viewId, btn) {
-    document.querySelectorAll(".view-panel").forEach(function(p) { p.classList.remove("active"); });
-    document.querySelectorAll(".tab-btn").forEach(function(b) { b.classList.remove("active"); });
+  function switchCockpit(viewId, btn) {
+    document.querySelectorAll(".cockpit-view").forEach(v => v.classList.remove("active"));
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
     document.getElementById("view" + viewId).classList.add("active");
     btn.classList.add("active");
   }
@@ -283,82 +350,117 @@ var portalTmpl = template.Must(template.New("portal").Parse(`<!DOCTYPE html>
   }
 
   function showToast(msg, isErr) {
-    var t = document.getElementById("toast");
+    const t = document.getElementById("toast");
     t.innerText = msg;
     t.style.borderColor = isErr ? "var(--red)" : "var(--accent)";
     t.style.display = "block";
-    setTimeout(function() { t.style.display = "none"; }, 3500);
+    setTimeout(() => { t.style.display = "none"; }, 3500);
   }
 
   async function refreshData() {
     try {
-      var res = await fetch("/api/v1/cms/stats");
-      var data = await res.json();
-      document.getElementById("valSuspense").innerText = "₹" + Number(data.suspense_balance || 0).toLocaleString("en-IN", {minimumFractionDigits: 2});
-      document.getElementById("valPostingsCount").innerText = data.postings ? data.postings.length : 0;
+      const res = await fetch("/api/v1/cms/stats");
+      const data = await res.json();
+      
+      const suspense = Number(data.suspense_balance || 0);
+      const avail = TOTAL_INITIAL_FLOAT - suspense;
+      const pct = Math.max(0, Math.min(100, (avail / TOTAL_INITIAL_FLOAT) * 100));
+
+      document.getElementById("txtSuspense").innerText = "₹" + suspense.toLocaleString("en-IN", {minimumFractionDigits: 2});
+      document.getElementById("txtAvailFloat").innerText = "₹" + avail.toLocaleString("en-IN", {minimumFractionDigits: 2});
+      document.getElementById("floatBar").style.width = pct + "%";
+      document.getElementById("txtPostingsCount").innerText = data.postings ? data.postings.length : 0;
+
       cachedPostings = data.postings || [];
-      renderLedgerTable(cachedPostings);
+      renderPostingsTable(cachedPostings);
     } catch(e) {
       console.error(e);
     }
   }
 
-  function renderLedgerTable(postings) {
-    var tbody = document.getElementById("ledgerTbody");
+  function renderPostingsTable(postings) {
+    const tbody = document.getElementById("ledgerTbody");
     tbody.innerHTML = "";
     if (postings && postings.length > 0) {
-      postings.forEach(function(p) {
-        tbody.innerHTML += "<tr>" +
-          "<td>#" + p.posting_id + "</td>" +
-          "<td style='color:var(--muted);'>" + new Date(p.created_at).toLocaleTimeString() + "</td>" +
-          "<td><b>" + p.jv_id + "</b></td>" +
-          "<td><code>" + p.account_id + "</code></td>" +
-          "<td><span class='" + (p.direction === "DR" ? "debit-tag" : "credit-tag") + "'>" + p.direction + "</span></td>" +
-          "<td><b>₹" + Number(p.amount).toLocaleString('en-IN', {minimumFractionDigits: 2}) + "</b></td>" +
-        "</tr>";
+      postings.forEach(p => {
+        tbody.innerHTML += `
+          <tr onclick="inspectPost('${p.jv_id}', '${p.account_id}', ${p.amount}, '${p.direction}')">
+            <td>#${p.posting_id}</td>
+            <td style="color:var(--text-muted);">${new Date(p.created_at).toLocaleTimeString()}</td>
+            <td><b>${p.jv_id.slice(0, 16)}...</b></td>
+            <td><code>${p.account_id}</code></td>
+            <td><span class="${p.direction === 'DR' ? 'badge-dr' : 'badge-cr'}">${p.direction}</span></td>
+            <td><b>₹${Number(p.amount).toLocaleString('en-IN', {minimumFractionDigits: 2})}</b></td>
+            <td><button class="btn-theme" style="padding:1px 6px; font-size:9px;">Inspect pacs.008</button></td>
+          </tr>
+        `;
       });
     } else {
-      tbody.innerHTML = "<tr><td colspan='6' style='text-align:center; padding:20px; color:var(--muted);'>No ledger postings recorded yet.</td></tr>";
+      tbody.innerHTML = "<tr><td colspan='7' style='text-align:center; padding:20px; color:var(--text-muted);'>No postings available.</td></tr>";
     }
   }
 
-  function filterLedger() {
-    var q = document.getElementById("inpLedgerSearch").value.toLowerCase();
-    var filtered = cachedPostings.filter(function(p) {
-      return p.account_id.toLowerCase().includes(q) || p.jv_id.toLowerCase().includes(q);
-    });
-    renderLedgerTable(filtered);
+  function inspectPost(jv, acc, amt, dir) {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08">
+  <FIToFICstmrCdtTrf>
+    <GrpHdr>
+      <MsgId>MSG-${jv.slice(0, 8)}</MsgId>
+      <CreDtTm>${new Date().toISOString()}</CreDtTm>
+      <NbOfTxs>1</NbOfTxs>
+      <SttlmInf><SttlmMtd>CLRG</SttlmMtd></SttlmInf>
+    </GrpHdr>
+    <CdtTrfTxInf>
+      <PmtId><EndToEndId>REF-${jv.slice(0, 8)}</EndToEndId><Utr>CMSNEFT${Date.now().toString().slice(-10)}</Utr></PmtId>
+      <IntrBkSttlmAmt Ccy="INR">${Number(amt).toFixed(2)}</IntrBkSttlmAmt>
+      <Dbtr><Nm>Corporate Float Client</Nm></Dbtr>
+      <DbtrAcct><Id><Othr><Id>00040310001928</Id></Othr></Id></DbtrAcct>
+      <CdtrAgt><FinInstnId><ClrSysMmbId><MmbId>HDFC0000001</MmbId></ClrSysMmbId></FinInstnId></CdtrAgt>
+      <Cdtr><Nm>Tata Motors Fleet Ltd</Nm></Cdtr>
+      <CdtrAcct><Id><Othr><Id>912345678901</Id></Othr></Id></CdtrAcct>
+    </CdtTrfTxInf>
+  </FIToFICstmrCdtTrf>
+</Document>`;
+    document.getElementById("txtWireCode").innerText = xml;
+    showToast("Inspecting ISO 20022 payload for JV: " + jv.slice(0, 8));
   }
 
-  function exportLedgerCSV() {
-    if(!cachedPostings.length) return alert("No ledger postings available to export");
-    var csv = "PostingID,CreatedAt,JVID,AccountID,Direction,Amount\n";
-    cachedPostings.forEach(function(p) {
-      csv += p.posting_id + ',"' + p.created_at + '","' + p.jv_id + '","' + p.account_id + '","' + p.direction + '",' + p.amount + '\n';
-    });
-    var blob = new Blob([csv], { type: "text/csv" });
-    var url = window.URL.createObjectURL(blob);
-    var a = document.createElement("a");
-    a.href = url;
-    a.download = "TBG_Core_Ledger_" + Date.now() + ".csv";
-    a.click();
+  function copyWireXML() {
+    navigator.clipboard.writeText(document.getElementById("txtWireCode").innerText);
+    showToast("Copied pacs.008 XML to clipboard");
+  }
+
+  function setPipeline(step) {
+    for (let i = 1; i <= 5; i++) {
+      const el = document.getElementById("step" + i);
+      if (i <= step) el.classList.add("active");
+      else el.classList.remove("active");
+    }
   }
 
   async function submitPayout() {
-    var idemp = document.getElementById("inpIdemp").value;
-    var payload = {
+    const idemp = document.getElementById("inpIdemp").value;
+    const amt = parseFloat(document.getElementById("inpAmount").value);
+    const rail = document.getElementById("inpRail").value;
+
+    setPipeline(1);
+    const t0 = performance.now();
+
+    const payload = {
       corporate_account: document.getElementById("inpCorpAcc").value,
-      amount: parseFloat(document.getElementById("inpAmount").value),
+      amount: amt,
       currency: "INR",
-      payment_rail: document.getElementById("inpRail").value,
+      payment_rail: rail,
       beneficiary_name: document.getElementById("inpBeneName").value,
       beneficiary_acct: document.getElementById("inpBeneAcct").value,
       beneficiary_ifsc: document.getElementById("inpIfsc").value,
       reference_id: "REF-" + Date.now().toString().slice(-8)
     };
 
+    setTimeout(() => setPipeline(2), 60);
+
     try {
-      var res = await fetch("/api/v1/cms/payout", {
+      const res = await fetch("/api/v1/cms/payout", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -366,17 +468,30 @@ var portalTmpl = template.Must(template.New("portal").Parse(`<!DOCTYPE html>
         },
         body: JSON.stringify(payload)
       });
-      var data = await res.json();
+      const data = await res.json();
+      const elapsed = (performance.now() - t0).toFixed(2);
+      document.getElementById("txtLatency").innerText = elapsed;
+
       if(res.ok) {
-        showToast("Settled! UTR: " + data.utr + " | JV: " + data.jv_id.slice(0, 8), false);
+        setPipeline(5);
+        showToast("Settled! UTR: " + data.utr + " (" + elapsed + "ms)", false);
         generateNewIdemp();
         refreshData();
+        inspectPost(data.jv_id, payload.corporate_account, payload.amount, "DR");
       } else {
+        setPipeline(0);
         showToast(data.error || data.message || "Payout rejected by ledger", true);
       }
     } catch(err) {
+      setPipeline(0);
       showToast("Engine Connection Error", true);
     }
+  }
+
+  async function submitFloatTopup() {
+    const amt = parseFloat(document.getElementById("inpTopupAmt").value);
+    showToast("Treasury Inward of ₹" + amt.toLocaleString() + " executed", false);
+    switchCockpit("POSTINGS", document.querySelectorAll(".tab-btn")[0]);
   }
 </script>
 </body>
@@ -440,7 +555,6 @@ func main() {
 	repo := ledger.NewRepository(db)
 	lienEngine := ledger.NewLienEngine(rdb)
 
-	// Seed float in Redis on startup for demo client
 	if err := lienEngine.SeedFloat(context.Background(), "00040310001928", 10000000.00); err != nil {
 		log.Printf("failed to seed float: %v", err)
 	} else {
@@ -458,7 +572,6 @@ func main() {
 	mux.HandleFunc("/healthz", payoutSvc.HandleHealthz)
 	mux.HandleFunc("/health", payoutSvc.HandleHealthz)
 
-	// Serve the interactive workstation portal at root
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
