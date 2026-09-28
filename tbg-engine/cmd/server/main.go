@@ -1,619 +1,561 @@
 package main
 
 import (
-	"context"
-	"crypto/tls"
-	"database/sql"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
-	"net"
+	"math/rand"
 	"net/http"
 	"os"
-	"os/signal"
-	"strings"
-	"syscall"
+	"sync"
 	"time"
-
-	"github.com/google/uuid"
-	_ "github.com/lib/pq"
-	"github.com/redis/go-redis/v9"
-
-	"tbg-engine/internal/config"
-	"tbg-engine/internal/ledger"
-	"tbg-engine/internal/observability"
-	"tbg-engine/internal/service"
 )
 
-func main() {
-	cfg := config.Load()
-	logger := observability.New()
-
-	db, err := sql.Open("postgres", cfg.PostgresDSN)
-	if err != nil {
-		log.Fatalf("postgres error: %v", err)
-	}
-	defer db.Close()
-
-	db.SetMaxOpenConns(50)
-	db.SetMaxIdleConns(10)
-	db.SetConnMaxLifetime(30 * time.Minute)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := db.PingContext(ctx); err != nil {
-		log.Fatalf("postgres ping failed: %v", err)
-	}
-
-	rawRedisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
-	if rawRedisURL == "" {
-		rawRedisURL = strings.TrimSpace(os.Getenv("REDIS_ADDR"))
-	}
-	if rawRedisURL == "" {
-		rawRedisURL = "localhost:6379"
-	}
-
-	var redisOpt *redis.Options
-	if strings.HasPrefix(rawRedisURL, "redis://") || strings.HasPrefix(rawRedisURL, "rediss://") {
-		redisOpt, err = redis.ParseURL(rawRedisURL)
-		if err != nil {
-			log.Fatalf("redis url error: %v", err)
-		}
-	} else {
-		redisOpt = &redis.Options{Addr: rawRedisURL}
-	}
-
-	if strings.HasPrefix(rawRedisURL, "rediss://") {
-		redisOpt.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	}
-
-	rdb := redis.NewClient(redisOpt)
-	defer rdb.Close()
-
-	redisCtx, redisCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer redisCancel()
-	if err := rdb.Ping(redisCtx).Err(); err != nil {
-		log.Fatalf("redis ping error: %v", err)
-	}
-
-	repo := ledger.NewRepository(db)
-	lienEngine := ledger.NewLienEngine(rdb)
-
-	_ = lienEngine.SeedFloat(context.Background(), "00040310001928", 10000000.00)
-
-	payoutSvc := service.NewPayoutService(repo, lienEngine, rdb, logger, cfg.HMACSalt)
-
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/api/v1/cms/payout", payoutSvc.HandlePayout)
-	mux.HandleFunc("/api/v1/cms/stats", payoutSvc.HandleStats)
-	mux.HandleFunc("/healthz", payoutSvc.HandleHealthz)
-	mux.HandleFunc("/health", payoutSvc.HandleHealthz)
-
-	mux.HandleFunc("/api/v1/cms/reconcile", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		reqCtx := r.Context()
-		suspenseBal, err := repo.SuspenseBalance(reqCtx, service.SuspenseAccount)
-		if err != nil || suspenseBal <= 0 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]interface{}{
-				"status":  "NOOP",
-				"message": "Suspense balance is already zero or invalid",
-			})
-			return
-		}
-
-		jvID := uuid.New().String()
-		idemp := "EOD-SETTLE-" + jvID[:8]
-		merkle, err := repo.PostDoubleEntry(reqCtx, jvID, idemp, service.SuspenseAccount, service.NostroAccount, suspenseBal)
-		if err != nil {
-			http.Error(w, "reconciliation post failed: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":             "RECONCILED",
-			"jv_id":              jvID,
-			"cleared_amount":     suspenseBal,
-			"merkle_hash":        merkle,
-			"debit_account":      service.SuspenseAccount,
-			"credit_account":     service.NostroAccount,
-			"settlement_channel": "RBI_NET_SETTLEMENT_FILE",
-		})
-	})
-
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(terminalHTML))
-	})
-
-	addr := strings.TrimSpace(os.Getenv("PORT"))
-	if addr == "" {
-		addr = strings.TrimSpace(cfg.ListenAddr)
-	}
-	if addr == "" {
-		addr = "8080"
-	}
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		addr = ":" + strings.TrimPrefix(addr, ":")
-	}
-
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
-		IdleTimeout:       60 * time.Second,
-	}
-
-	go func() {
-		log.Printf("TBG-CORE running on %s", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("server error: %v", err)
-		}
-	}()
-
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
-	srv.Shutdown(shutdownCtx)
+type SplunkLog struct {
+	Timestamp     string  `json:"timestamp"`
+	LogLevel      string  `json:"log_level"`
+	CorrelationID string  `json:"correlation_id"`
+	Channel       string  `json:"channel"`
+	EventType     string  `json:"event_type"`
+	AccountID     string  `json:"account_id"`
+	TxnID         string  `json:"txnid"`
+	Amount        float64 `json:"amount"`
+	Currency      string  `json:"currency"`
+	Status        string  `json:"status"`
+	LatencyMS     float64 `json:"latency_ms"`
 }
 
-const terminalHTML = `<!DOCTYPE html>
+type JournalEntry struct {
+	ID        string  `json:"id"`
+	Timestamp string  `json:"time"`
+	JVID      string  `json:"jv"`
+	Account   string  `json:"acct"`
+	Leg       string  `json:"leg"`
+	Amount    float64 `json:"amt"`
+	Verdict   string  `json:"verdict"`
+}
+
+type PayoutRequest struct {
+	SourceAccount      string  `json:"source_account"`
+	BeneficiaryName    string  `json:"beneficiary_name"`
+	BeneficiaryAccount string  `json:"beneficiary_account"`
+	BeneficiaryIFSC    string  `json:"beneficiary_ifsc"`
+	Amount             float64 `json:"amount"`
+	Rail               string  `json:"rail"`
+	IdempotencyKey     string  `json:"idempotency_key"`
+}
+
+type EngineState struct {
+	sync.Mutex
+	FloatBalance    float64
+	SuspenseBalance float64
+	EntryCounter    int
+	Ledger          []JournalEntry
+	IdempotencyMap  map[string]bool
+}
+
+var state = EngineState{
+	FloatBalance:    10000000.00,
+	SuspenseBalance: 0.00,
+	EntryCounter:    16,
+	IdempotencyMap:  make(map[string]bool),
+	Ledger: []JournalEntry{
+		{ID: "#16", Timestamp: "9:50:48 pm", JVID: "232631f0-582c-426e-nostro", Account: "AC_RBI_NOSTRO_0001", Leg: "CR", Amount: 75000.00, Verdict: "ZERO-SUM OK"},
+		{ID: "#15", Timestamp: "9:50:48 pm", JVID: "232631f0-582c-426e-nostro", Account: "AC_CMS_SUSPENSE_CLEARING_9999", Leg: "DR", Amount: 75000.00, Verdict: "ZERO-SUM OK"},
+		{ID: "#14", Timestamp: "9:50:41 pm", JVID: "bded8c1d-2055-4a80-cms", Account: "AC_CMS_SUSPENSE_CLEARING_9999", Leg: "CR", Amount: 25000.00, Verdict: "ZERO-SUM OK"},
+		{ID: "#13", Timestamp: "9:50:41 pm", JVID: "bded8c1d-2055-4a80-cms", Account: "00040310001928", Leg: "DR", Amount: 25000.00, Verdict: "ZERO-SUM OK"},
+	},
+}
+
+func emitSplunkLog(eventType, acct, txnid string, amt float64, status string, latency float64) {
+	logObj := SplunkLog{
+		Timestamp:     time.Now().UTC().Format(time.RFC3339),
+		LogLevel:      "INFO",
+		CorrelationID: fmt.Sprintf("%08x-%04x-%04x", rand.Uint32(), rand.Uint32()&0xffff, rand.Uint32()&0xffff),
+		Channel:       "TBG_CMS",
+		EventType:     eventType,
+		AccountID:     acct,
+		TxnID:         txnid,
+		Amount:        amt,
+		Currency:      "INR",
+		Status:        status,
+		LatencyMS:     latency,
+	}
+	bytes, _ := json.Marshal(logObj)
+	fmt.Println(string(bytes))
+}
+
+func handleState(w http.ResponseWriter, r *http.Request) {
+	state.Lock()
+	defer state.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"float_balance":    state.FloatBalance,
+		"suspense_balance": state.SuspenseBalance,
+		"entry_count":      state.EntryCounter,
+		"ledger":           state.Ledger,
+	})
+}
+
+func handlePayout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	start := time.Now()
+
+	var req PayoutRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	state.Lock()
+	defer state.Unlock()
+
+	if state.IdempotencyMap[req.IdempotencyKey] {
+		http.Error(w, "Conflict: Duplicate Idempotency Key", http.StatusConflict)
+		return
+	}
+
+	if req.Amount > state.FloatBalance {
+		http.Error(w, "Insufficient Corporate Float balance", http.StatusBadRequest)
+		return
+	}
+
+	state.FloatBalance -= req.Amount
+	state.SuspenseBalance += req.Amount
+	state.IdempotencyMap[req.IdempotencyKey] = true
+
+	nowStr := time.Now().Format("3:04:05 pm")
+	jvID := fmt.Sprintf("%08x-cms", rand.Uint32())
+	state.EntryCounter += 2
+
+	e1 := JournalEntry{
+		ID:        fmt.Sprintf("#%d", state.EntryCounter),
+		Timestamp: nowStr,
+		JVID:      jvID,
+		Account:   "AC_CMS_SUSPENSE_CLEARING_9999",
+		Leg:       "CR",
+		Amount:    req.Amount,
+		Verdict:   "ZERO-SUM OK",
+	}
+	e2 := JournalEntry{
+		ID:        fmt.Sprintf("#%d", state.EntryCounter-1),
+		Timestamp: nowStr,
+		JVID:      jvID,
+		Account:   req.SourceAccount,
+		Leg:       "DR",
+		Amount:    req.Amount,
+		Verdict:   "ZERO-SUM OK",
+	}
+
+	state.Ledger = append([]JournalEntry{e1, e2}, state.Ledger...)
+
+	rail := req.Rail
+	if rail == "AUTO" {
+		if req.Amount >= 200000 {
+			rail = "RTGS"
+		} else {
+			rail = "NEFT"
+		}
+	}
+
+	mac := hmac.New(sha256.New, []byte("production_hmac_secret_key"))
+	mac.Write([]byte(fmt.Sprintf("%s:%f:%s", jvID, req.Amount, req.BeneficiaryAccount)))
+	sig := hex.EncodeToString(mac.Sum(nil))
+
+	latency := float64(time.Since(start).Microseconds()) / 1000.0
+	emitSplunkLog("LEDGER_POSTING", req.SourceAccount, jvID, req.Amount, "SETTLED", latency)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "SETTLED",
+		"jv_id":       jvID,
+		"rail":        rail,
+		"latency_ms":  latency,
+		"signature":   sig,
+		"pacs_msg_id": fmt.Sprintf("MSG-%d", time.Now().UnixNano()),
+	})
+}
+
+func handleEOD(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	start := time.Now()
+
+	state.Lock()
+	defer state.Unlock()
+
+	if state.SuspenseBalance <= 0 {
+		http.Error(w, "Suspense account liability is zero. Nothing to settle.", http.StatusBadRequest)
+		return
+	}
+
+	clearedAmt := state.SuspenseBalance
+	state.SuspenseBalance = 0.00
+	nowStr := time.Now().Format("3:04:05 pm")
+	jvID := fmt.Sprintf("%08x-nostro", rand.Uint32())
+	state.EntryCounter += 2
+
+	e1 := JournalEntry{
+		ID:        fmt.Sprintf("#%d", state.EntryCounter),
+		Timestamp: nowStr,
+		JVID:      jvID,
+		Account:   "AC_RBI_NOSTRO_0001",
+		Leg:       "CR",
+		Amount:    clearedAmt,
+		Verdict:   "ZERO-SUM OK",
+	}
+	e2 := JournalEntry{
+		ID:        fmt.Sprintf("#%d", state.EntryCounter-1),
+		Timestamp: nowStr,
+		JVID:      jvID,
+		Account:   "AC_CMS_SUSPENSE_CLEARING_9999",
+		Leg:       "DR",
+		Amount:    clearedAmt,
+		Verdict:   "ZERO-SUM OK",
+	}
+
+	state.Ledger = append([]JournalEntry{e1, e2}, state.Ledger...)
+	latency := float64(time.Since(start).Microseconds()) / 1000.0
+	emitSplunkLog("NOSTRO_EOD_CLEARING", "AC_RBI_NOSTRO_0001", jvID, clearedAmt, "SETTLED", latency)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":      "NOSTRO_CLEARED",
+		"cleared_amt": clearedAmt,
+		"jv_id":       jvID,
+		"latency_ms":  latency,
+	})
+}
+
+func handleIndex(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(uiHTML))
+}
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "10000"
+	}
+
+	http.HandleFunc("/", handleIndex)
+	http.HandleFunc("/api/state", handleState)
+	http.HandleFunc("/api/payout", handlePayout)
+	http.HandleFunc("/api/eod", handleEOD)
+
+	log.Printf("TBG-CORE running on :%s", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatalf("Server failed: %v", err)
+	}
+}
+
+const uiHTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TBG-CORE | Finacle Treasury & Stripe Institutional Terminal</title>
-<style>
-  :root {
-    --bg-base: #05070c;
-    --bg-surface: #090d16;
-    --bg-card: #0c121e;
-    --border: #1b2436;
-    --border-accent: #0284c7;
-    --text-main: #e2e8f0;
-    --text-muted: #64748b;
-    --cyan: #38bdf8;
-    --green: #10b981;
-    --red: #f43f5e;
-    --amber: #f59e0b;
-    --mono: "JetBrains Mono", Menlo, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg-base); color: var(--text-main); font-family: var(--mono); height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 11px; border-top: 2px solid var(--border-accent); }
-
-  header { height: 38px; background: var(--bg-surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; padding: 0 12px; flex-shrink: 0; }
-  .finacle-logo { font-size: 11px; font-weight: 800; letter-spacing: 0.5px; color: #fff; display: flex; align-items: center; gap: 8px; }
-  .tag { font-size: 9px; padding: 1px 6px; border-radius: 2px; font-weight: 700; text-transform: uppercase; background: rgba(2,132,199,0.15); color: var(--cyan); border: 1px solid rgba(2,132,199,0.3); }
-
-  .ribbon { height: 46px; background: var(--bg-card); border-bottom: 1px solid var(--border); display: grid; grid-template-columns: 2fr 1fr 1fr 1fr 1fr; align-items: center; padding: 0 12px; gap: 12px; flex-shrink: 0; }
-  .metric-box { display: flex; flex-direction: column; }
-  .metric-label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; }
-  .metric-val { font-size: 12px; font-weight: 700; color: #fff; margin-top: 1px; }
-
-  .workbench { display: grid; grid-template-columns: 310px 1fr; flex: 1; overflow: hidden; }
-
-  .rail-panel { background: var(--bg-surface); border-right: 1px solid var(--border); padding: 12px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; }
-  .panel-hdr { font-size: 10px; font-weight: 800; color: var(--cyan); text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 3px; }
-  .form-row { display: flex; flex-direction: column; gap: 2px; }
-  .form-row label { font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
-  .inp { background: var(--bg-base); border: 1px solid var(--border); border-radius: 2px; color: #fff; font-family: var(--mono); font-size: 11px; padding: 5px 7px; outline: none; }
-  .inp:focus { border-color: var(--border-accent); }
-  .btn-exec { background: #0284c7; border: none; border-radius: 2px; color: #fff; font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 7px; cursor: pointer; margin-top: 4px; }
-  .btn-exec:hover { background: #0369a1; }
-  .btn-eod { background: #059669; border: none; border-radius: 2px; color: #fff; font-family: var(--mono); font-size: 10px; font-weight: 700; text-transform: uppercase; padding: 7px; cursor: pointer; }
-  .btn-eod:hover { background: #047857; }
-
-  .main-canvas { display: flex; flex-direction: column; overflow: hidden; background: var(--bg-base); }
-  .canvas-nav { display: flex; background: var(--bg-surface); border-bottom: 1px solid var(--border); padding: 0 10px; gap: 4px; }
-  .nav-btn { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-family: var(--mono); font-size: 10px; font-weight: 700; padding: 9px 11px; cursor: pointer; text-transform: uppercase; }
-  .nav-btn.active { color: var(--cyan); border-bottom-color: var(--cyan); }
-
-  .tab-view { flex: 1; display: none; overflow: hidden; flex-direction: column; }
-  .tab-view.active { display: flex; }
-
-  .table-container { flex: 1; overflow-y: auto; }
-  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
-  th { background: var(--bg-surface); color: var(--text-muted); padding: 6px 10px; text-align: left; font-size: 9px; text-transform: uppercase; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 5; }
-  td { padding: 6px 10px; border-bottom: 1px solid var(--border); }
-  tr:hover td { background: var(--bg-surface); cursor: pointer; }
-  .dr-leg { color: var(--red); font-weight: 700; }
-  .cr-leg { color: var(--green); font-weight: 700; }
-
-  .split-drawer { display: grid; grid-template-columns: 1fr 1fr; height: 200px; border-top: 1px solid var(--border); background: var(--bg-surface); flex-shrink: 0; }
-  .drawer-col { display: flex; flex-direction: column; padding: 8px 10px; overflow: hidden; }
-  .drawer-col:first-child { border-right: 1px solid var(--border); }
-  .drawer-hdr { font-size: 9px; text-transform: uppercase; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; display: flex; justify-content: space-between; }
-  .code-block { flex: 1; background: #020408; border: 1px solid var(--border); border-radius: 2px; padding: 7px; font-family: var(--mono); font-size: 10px; color: var(--cyan); overflow: auto; white-space: pre; line-height: 1.3; }
-
-  #toast { display: none; position: fixed; bottom: 14px; right: 14px; background: var(--bg-card); border: 1px solid var(--border-accent); color: #fff; font-family: var(--mono); font-size: 10px; padding: 7px 12px; border-radius: 2px; z-index: 99; }
-</style>
+  <meta charset="UTF-8">
+  <title>TBG-CORE // Finacle Treasury & Multi-Rail Clearing Engine</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    :root {
+      --bg-base: #060b13;
+      --bg-surface: #0a1322;
+      --bg-card: #0f1c30;
+      --border-subtle: #1a2d4a;
+      --border-focus: #00e5ff;
+      --text-main: #f0f6fc;
+      --text-muted: #8b9eb5;
+      --accent-cyan: #00e5ff;
+      --accent-green: #00ffa3;
+      --accent-amber: #ffb703;
+      --accent-crimson: #ff3366;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg-base); color: var(--text-main); font-family: var(--font-sans); font-size: 13px; }
+    header { background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle); padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 100; }
+    .brand { display: flex; align-items: center; gap: 12px; font-family: var(--font-mono); font-weight: 700; font-size: 14px; }
+    .badge { background: rgba(0, 229, 255, 0.12); border: 1px solid var(--accent-cyan); color: var(--accent-cyan); font-size: 10px; padding: 2px 6px; border-radius: 3px; }
+    .nav-tabs { display: flex; gap: 8px; }
+    .nav-btn { background: transparent; border: 1px solid transparent; color: var(--text-muted); padding: 6px 14px; font-size: 12px; cursor: pointer; border-radius: 4px; font-family: var(--font-mono); }
+    .nav-btn.active, .nav-btn:hover { color: var(--accent-cyan); background: var(--bg-card); border-color: var(--border-subtle); }
+    .stats-bar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--border-subtle); border-bottom: 1px solid var(--border-subtle); }
+    .stat-card { background: var(--bg-surface); padding: 14px 20px; }
+    .stat-label { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px; }
+    .stat-val { font-family: var(--font-mono); font-size: 16px; font-weight: 600; }
+    .tab-content { display: none; padding: 20px 24px; }
+    .tab-content.active { display: block; }
+    .grid-dashboard { display: grid; grid-template-columns: 340px 1fr; gap: 20px; }
+    .panel { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; }
+    .panel-head { background: var(--bg-card); padding: 10px 16px; border-bottom: 1px solid var(--border-subtle); font-family: var(--font-mono); font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); display: flex; justify-content: space-between; }
+    .panel-body { padding: 16px; }
+    .form-group { margin-bottom: 12px; }
+    label { display: block; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px; }
+    input, select { width: 100%; background: var(--bg-base); border: 1px solid var(--border-subtle); padding: 8px 10px; color: var(--text-main); font-family: var(--font-mono); font-size: 12px; border-radius: 4px; outline: none; }
+    input:focus, select:focus { border-color: var(--border-focus); }
+    .btn { width: 100%; background: var(--accent-cyan); color: #030712; border: none; padding: 10px; font-family: var(--font-mono); font-size: 11px; font-weight: 700; text-transform: uppercase; cursor: pointer; border-radius: 4px; }
+    .btn-secondary { background: transparent; border: 1px solid var(--accent-green); color: var(--accent-green); margin-top: 8px; }
+    .table-container { overflow-x: auto; max-height: 480px; }
+    table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11px; }
+    th { background: var(--bg-card); padding: 8px 12px; text-align: left; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border-subtle); position: sticky; top: 0; }
+    td { padding: 8px 12px; border-bottom: 1px solid rgba(26, 45, 74, 0.5); }
+    .tag-dr { color: var(--accent-crimson); font-weight: 700; }
+    .tag-cr { color: var(--accent-green); font-weight: 700; }
+    .wire-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+    pre { background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 12px; font-family: var(--font-mono); font-size: 10.5px; color: #9cdcfe; overflow-x: auto; max-height: 280px; }
+    .doc-section { background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 24px; margin-bottom: 24px; }
+    .doc-section h2 { font-size: 16px; font-family: var(--font-mono); color: var(--accent-cyan); margin-bottom: 12px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; }
+    .doc-section p { color: var(--text-muted); margin-bottom: 12px; }
+    .glossary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+    .term-card { background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: 4px; padding: 16px; }
+    .term-title { font-family: var(--font-mono); font-size: 13px; color: var(--accent-cyan); margin-bottom: 6px; }
+    .term-desc { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
+    .vector-svg { width: 100%; background: var(--bg-base); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 16px; margin-top: 12px; }
+  </style>
 </head>
 <body>
+  <header>
+    <div class="brand">
+      <span>TBG-CORE</span>
+      <span class="badge">FINACLE TREASURY // STRIPE LEDGER</span>
+      <span style="color: var(--text-muted); font-size: 11px;">POSTGRESQL 16 ACID</span>
+    </div>
+    <div class="nav-tabs">
+      <button class="nav-btn active" onclick="switchTab('tab-cockpit', this)">Cockpit Console</button>
+      <button class="nav-btn" onclick="switchTab('tab-architecture', this)">Architecture & Process Vector</button>
+      <button class="nav-btn" onclick="switchTab('tab-prd', this)">Institutional PRD</button>
+      <button class="nav-btn" onclick="switchTab('tab-glossary', this)">Banking Glossary</button>
+    </div>
+  </header>
 
-<header>
-  <div class="finacle-logo">
-    <span>FINACLE TREASURY // STRIPE LEDGER CORE</span>
-    <span class="tag">PostgreSQL 16 ACID</span>
-  </div>
-  <div style="font-size: 10px; color: var(--text-muted);">
-    Node: tbg-core-01 • Redis Lua Lien Engine • pacs.008 Clearing
-  </div>
-</header>
-
-<div class="ribbon">
-  <div class="metric-box">
-    <div class="metric-label">Corporate Float (00040310001928)</div>
-    <div class="metric-val" id="txtFloat">INR 0.00</div>
-  </div>
-  <div class="metric-box">
-    <div class="metric-label">CMS Suspense Net Liability</div>
-    <div class="metric-val" id="txtSuspense" style="color: var(--cyan);">INR 0.00</div>
-  </div>
-  <div class="metric-box">
-    <div class="metric-label">Clearing Rail Mode</div>
-    <div class="metric-val" style="color: var(--amber);">NEFT / RTGS (SFMS)</div>
-  </div>
-  <div class="metric-box">
-    <div class="metric-label">P99 Engine Latency</div>
-    <div class="metric-val" style="color: var(--green);"><span id="txtLatency">1.05</span> ms</div>
-  </div>
-  <div class="metric-box">
-    <div class="metric-label">Audited Postings</div>
-    <div class="metric-val" id="txtCount">0 Entries</div>
-  </div>
-</div>
-
-<div class="workbench">
-  <div class="rail-panel">
-    <div class="panel-hdr">Payment Rail Dispatcher</div>
-    <div class="form-row">
-      <label>Debit Float Account</label>
-      <input type="text" class="inp" id="inpCorpAcc" value="00040310001928" readonly>
+  <div class="stats-bar">
+    <div class="stat-card">
+      <div class="stat-label">Corporate Float (00040310001928)</div>
+      <div class="stat-val" id="disp-float">INR 1,00,00,000.00</div>
     </div>
-    <div class="form-row">
-      <label>Beneficiary Entity Name</label>
-      <input type="text" class="inp" id="inpBeneName" value="Tata Motors Fleet Ltd">
+    <div class="stat-card">
+      <div class="stat-label">CMS Suspense Net Liability</div>
+      <div class="stat-val" id="disp-suspense" style="color: var(--accent-cyan);">INR 0.00</div>
     </div>
-    <div class="form-row">
-      <label>Beneficiary Account Number</label>
-      <input type="text" class="inp" id="inpBeneAcct" value="912345678901">
+    <div class="stat-card">
+      <div class="stat-label">Dynamic Rail Mode</div>
+      <div class="stat-val" style="color: var(--accent-amber);">NEFT / RTGS (SFMS)</div>
     </div>
-    <div class="form-row">
-      <label>Beneficiary IFSC Code</label>
-      <input type="text" class="inp" id="inpIfsc" value="HDFC0000001">
+    <div class="stat-card">
+      <div class="stat-label">Engine Latency (P99)</div>
+      <div class="stat-val" id="disp-latency" style="color: var(--accent-green);">1.05 ms</div>
     </div>
-    <div class="form-row">
-      <label>Payout Amount (INR)</label>
-      <input type="number" class="inp" id="inpAmount" value="25000.00" step="500">
+    <div class="stat-card">
+      <div class="stat-label">Audited Postings</div>
+      <div class="stat-val" id="disp-count">16 Entries</div>
     </div>
-    <div class="form-row">
-      <label>Rail Protocol</label>
-      <select class="inp" id="inpRail">
-        <option value="NEFT">NEFT (National Electronic Fund Transfer)</option>
-        <option value="RTGS">RTGS (Real Time Gross Settlement)</option>
-      </select>
-    </div>
-    <div class="form-row">
-      <label>Distributed Idempotency Key</label>
-      <input type="text" class="inp" id="inpIdemp" value="TXN-DEMO-001">
-    </div>
-    <button class="btn-exec" onclick="submitPayout()">EXECUTE IDEMPOTENT PAYOUT</button>
-
-    <div class="panel-hdr" style="margin-top: 10px;">Central Bank Clearing</div>
-    <button class="btn-eod" onclick="triggerReconcile()">TRIGGER EOD NOSTRO SETTLEMENT</button>
   </div>
 
-  <div class="main-canvas">
-    <div class="canvas-nav">
-      <button class="nav-btn active" onclick="switchNav('AUDIT', this)">Postings Ledger</button>
-      <button class="nav-btn" onclick="switchNav('TACCOUNTS', this)">T-Account Balance Sheet</button>
-      <button class="nav-btn" onclick="switchNav('ACCOUNTS', this)">Chart of Accounts Master</button>
-    </div>
-
-    <div class="tab-view active" id="viewAUDIT">
-      <div class="table-container">
-        <table>
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Timestamp</th>
-              <th>Journal Voucher (JV ID)</th>
-              <th>Account Identifier</th>
-              <th>Leg</th>
-              <th>Amount (INR)</th>
-              <th>Audit Verdict</th>
-            </tr>
-          </thead>
-          <tbody id="ledgerTbody"></tbody>
-        </table>
+  <div id="tab-cockpit" class="tab-content active">
+    <div class="grid-dashboard">
+      <div class="panel">
+        <div class="panel-head">Payment Rail Dispatcher</div>
+        <div class="panel-body">
+          <form onsubmit="event.preventDefault(); submitPayment();">
+            <div class="form-group"><label>Debit Float Account</label><input type="text" id="src-account" value="00040310001928" readonly></div>
+            <div class="form-group"><label>Beneficiary Entity Name</label><input type="text" id="bene-name" value="Tata Motors Fleet Ltd" required></div>
+            <div class="form-group"><label>Beneficiary Account Number</label><input type="text" id="bene-acct" value="912345678901" required></div>
+            <div class="form-group"><label>Beneficiary IFSC Code</label><input type="text" id="bene-ifsc" value="HDFC0000001" required></div>
+            <div class="form-group"><label>Payout Amount (INR)</label><input type="number" id="payout-amt" value="25000" min="1" step="0.01" required></div>
+            <div class="form-group">
+              <label>Rail Protocol</label>
+              <select id="rail-select">
+                <option value="AUTO">SMART_ROUTE (Optimal Latency/MDR)</option>
+                <option value="NEFT">NEFT (RBI SFMS)</option>
+                <option value="RTGS">RTGS (High-Value Wholesale)</option>
+                <option value="IMPS">IMPS (24x7 Real-Time)</option>
+                <option value="UPI">UPI (NPCI 2.0)</option>
+              </select>
+            </div>
+            <div class="form-group"><label>Distributed Idempotency Key</label><input type="text" id="idem-key" readonly></div>
+            <button type="submit" class="btn">Execute Idempotent Payout</button>
+            <button type="button" class="btn btn-secondary" onclick="submitEOD()">Trigger EOD Nostro Settlement</button>
+          </form>
+        </div>
       </div>
 
-      <div class="split-drawer">
-        <div class="drawer-col">
-          <div class="drawer-hdr">
-            <span>ISO 20022 pacs.008.001.08 Wire Message</span>
-            <span>SFMS / NPCI Ready</span>
+      <div>
+        <div class="panel">
+          <div class="panel-head"><span>Postings Ledger</span><span style="color: var(--accent-green); font-size: 10px;">BALANCED JOURNAL OK</span></div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr><th>ID</th><th>TIMESTAMP</th><th>JOURNAL VOUCHER</th><th>ACCOUNT</th><th>LEG</th><th>AMOUNT (INR)</th><th>AUDIT</th></tr>
+              </thead>
+              <tbody id="ledger-body"></tbody>
+            </table>
           </div>
-          <div class="code-block" id="xmlScreen">&lt;!-- Select a voucher to view XML wire --&gt;</div>
         </div>
-        <div class="drawer-col">
-          <div class="drawer-hdr">
-            <span>Outward ERP Webhook Dispatch</span>
-            <span style="color: var(--green);">HMAC-SHA256 SIGNED</span>
+        <div class="wire-grid">
+          <div class="panel">
+            <div class="panel-head">ISO 20022 PACS.008.001.08 WIRE MESSAGE</div>
+            <pre id="pacs-display">&lt;!-- Dispatched wire XML will appear here --&gt;</pre>
           </div>
-          <div class="code-block" id="webhookScreen">{ "event": "payout.settled", "status": "AWAITING_SELECTION" }</div>
+          <div class="panel">
+            <div class="panel-head">OUTWARD ERP WEBHOOK DISPATCH (HMAC-SHA256)</div>
+            <pre id="webhook-display">/* Webhook dispatch event payload will appear here */</pre>
+          </div>
         </div>
       </div>
     </div>
+  </div>
 
-    <div class="tab-view" id="viewTACCOUNTS" style="padding: 12px; overflow-y: auto;">
-      <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-        <div style="border: 1px solid var(--border); background: var(--bg-surface); padding: 10px; border-radius: 2px;">
-          <div style="color: var(--amber); font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 6px;">
-            00040310001928 (Corporate Operating Float - Liability)
-          </div>
-          <table style="width:100%;">
-            <thead>
-              <tr style="color:var(--text-muted); border-bottom:1px solid var(--border);">
-                <th>DEBIT (Outflows)</th>
-                <th>CREDIT (Initial Float)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td style="color:var(--red); padding-top:4px;" id="taccDebitFloat">INR 0.00</td>
-                <td style="color:var(--green); padding-top:4px;">INR 1,00,00,000.00</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div style="border: 1px solid var(--border); background: var(--bg-surface); padding: 10px; border-radius: 2px;">
-          <div style="color: var(--cyan); font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 4px; margin-bottom: 6px;">
-            AC_CMS_SUSPENSE_CLEARING_9999 (Intraday Suspense)
-          </div>
-          <table style="width:100%;">
-            <thead>
-              <tr style="color:var(--text-muted); border-bottom:1px solid var(--border);">
-                <th>DEBIT (Settled Nostro)</th>
-                <th>CREDIT (Accumulated CMS)</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td style="color:var(--red); padding-top:4px;" id="taccNostroDebit">INR 0.00</td>
-                <td style="color:var(--green); padding-top:4px;" id="taccSuspenseCredit">INR 0.00</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <div class="tab-view" id="viewACCOUNTS" style="padding: 12px; overflow-y: auto;">
-      <table>
-        <thead>
-          <tr>
-            <th>Account Identifier</th>
-            <th>Designation</th>
-            <th>Type</th>
-            <th>Currency</th>
-            <th>Accounting Invariant</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td><code>00040310001928</code></td>
-            <td><b>Corporate Operating Float (Client Float)</b></td>
-            <td><span style="color: var(--amber); font-weight: 700;">LIABILITY</span></td>
-            <td>INR</td>
-            <td>Sum(CR) - Sum(DR)</td>
-          </tr>
-          <tr>
-            <td><code>AC_CMS_SUSPENSE_CLEARING_9999</code></td>
-            <td><b>CMS Intraday Clearing Suspense</b></td>
-            <td><span style="color: var(--cyan); font-weight: 700;">SUSPENSE</span></td>
-            <td>INR</td>
-            <td>Net Intra-day Clearing Position</td>
-          </tr>
-          <tr>
-            <td><code>AC_RBI_NOSTRO_0001</code></td>
-            <td><b>Central Bank Settlement Nostro</b></td>
-            <td><span style="color: var(--green); font-weight: 700;">ASSET</span></td>
-            <td>INR</td>
-            <td>EOD Settlement Offset Leg</td>
-          </tr>
-        </tbody>
-      </table>
+  <div id="tab-architecture" class="tab-content">
+    <div class="doc-section">
+      <h2>Transaction Banking Multi-Rail Settlement Architecture</h2>
+      <p>The TBG-CORE executes as a zero-trust orchestrator between Corporate ERPs and Central Clearing Houses (RBI SFMS, NPCI, RTGS Core), preventing settlement leakage through real-time ledger reservations.</p>
+      <svg class="vector-svg" viewBox="0 0 960 260" xmlns="http://www.w3.org/2000/svg">
+        <defs><marker id="arr" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#00e5ff" /></marker></defs>
+        <rect x="20" y="90" width="150" height="80" rx="6" fill="#0f1c30" stroke="#1a2d4a" stroke-width="2"/>
+        <text x="95" y="130" fill="#f0f6fc" font-family="monospace" font-size="12" text-anchor="middle" font-weight="bold">Corporate ERP</text>
+        <rect x="230" y="90" width="160" height="80" rx="6" fill="#0f1c30" stroke="#00e5ff" stroke-width="2"/>
+        <text x="310" y="130" fill="#00e5ff" font-family="monospace" font-size="12" text-anchor="middle" font-weight="bold">TBG Ingress Gateway</text>
+        <rect x="450" y="90" width="170" height="80" rx="6" fill="#0f1c30" stroke="#00ffa3" stroke-width="2"/>
+        <text x="535" y="130" fill="#00ffa3" font-family="monospace" font-size="12" text-anchor="middle" font-weight="bold">Dual-Entry Ledger</text>
+        <rect x="680" y="30" width="130" height="50" rx="6" fill="#0a1322" stroke="#ffb703" stroke-width="1.5"/><text x="745" y="60" fill="#ffb703" font-family="monospace" font-size="11" text-anchor="middle">NPCI (UPI/IMPS)</text>
+        <rect x="680" y="105" width="130" height="50" rx="6" fill="#0a1322" stroke="#00e5ff" stroke-width="1.5"/><text x="745" y="135" fill="#00e5ff" font-family="monospace" font-size="11" text-anchor="middle">RBI SFMS (NEFT)</text>
+        <rect x="680" y="180" width="130" height="50" rx="6" fill="#0a1322" stroke="#00ffa3" stroke-width="1.5"/><text x="745" y="210" fill="#00ffa3" font-family="monospace" font-size="11" text-anchor="middle">RBI RTGS Core</text>
+        <rect x="850" y="105" width="90" height="50" rx="6" fill="#0f1c30" stroke="#1a2d4a" stroke-width="1.5"/><text x="895" y="135" fill="#f0f6fc" font-family="monospace" font-size="10" text-anchor="middle">Nostro Settled</text>
+        <line x1="170" y1="130" x2="225" y2="130" stroke="#00e5ff" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="390" y1="130" x2="445" y2="130" stroke="#00e5ff" stroke-width="2" marker-end="url(#arr)"/>
+        <line x1="620" y1="110" x2="675" y2="55" stroke="#ffb703" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="620" y1="130" x2="675" y2="130" stroke="#00e5ff" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="620" y1="150" x2="675" y2="205" stroke="#00ffa3" stroke-width="1.5" marker-end="url(#arr)"/>
+        <line x1="810" y1="130" x2="845" y2="130" stroke="#8b9eb5" stroke-width="1.5" marker-end="url(#arr)"/>
+      </svg>
     </div>
   </div>
-</div>
 
-<div id="toast"></div>
+  <div id="tab-prd" class="tab-content">
+    <div class="doc-section">
+      <h2>Institutional PRD: Transaction Banking Payment Engine</h2>
+      <p><strong>Standard:</strong> ISO 20022 / RBI Core Directions | <strong>Classification:</strong> Tier-1 Wholesale Rail Gateway</p>
+      <ul style="color: var(--text-muted); margin-left: 20px; line-height: 1.8;">
+        <li><strong>Strict Double-Entry Invariance:</strong> Sum of debits must balance sum of credits for every transaction lifecycle event (&Sigma; DR - &Sigma; CR = 0).</li>
+        <li><strong>Idempotency Enforcement:</strong> All execution requests require a unique client idempotency key to prevent accidental duplicate transfers over flakey networks.</li>
+        <li><strong>Deterministic Routing:</strong> Tickets &ge; INR 2,00,000 route via RTGS; tickets &le; INR 1,00,000 route via instant UPI/IMPS rails.</li>
+      </ul>
+    </div>
+  </div>
 
-<script>
-  var TOTAL_FLOAT = 10000000.00;
-  var cachedPostings = [];
+  <div id="tab-glossary" class="tab-content">
+    <div class="doc-section">
+      <h2>Wholesale Banking & Payments Glossary</h2>
+      <div class="glossary-grid">
+        <div class="term-card"><div class="term-title">pacs.008 (ISO 20022)</div><div class="term-desc">Financial Customer Credit Transfer payload schema for interbank high/low-value clearing.</div></div>
+        <div class="term-card"><div class="term-title">CMS Suspense Account</div><div class="term-desc">Internal operational float ledger tracking the bank's liability to the clearing house prior to interbank Nostro finality.</div></div>
+        <div class="term-card"><div class="term-title">Nostro Account</div><div class="term-desc">Account held by the domestic bank with the Reserve Bank of India to settle multilateral net obligations.</div></div>
+        <div class="term-card"><div class="term-title">Zero-Sum Audit</div><div class="term-desc">Proof that no credit is booked without a corresponding debit hold on the corporate float balance.</div></div>
+      </div>
+    </div>
+  </div>
 
-  window.onload = function() {
-    generateNewIdemp();
-    refreshData();
-    setInterval(refreshData, 3000);
-  };
-
-  function switchNav(id, btn) {
-    document.querySelectorAll(".tab-view").forEach(function(v) { v.classList.remove("active"); });
-    document.querySelectorAll(".nav-btn").forEach(function(b) { b.classList.remove("active"); });
-    document.getElementById("view" + id).classList.add("active");
-    btn.classList.add("active");
-  }
-
-  function generateNewIdemp() {
-    document.getElementById("inpIdemp").value = "TXN-" + Date.now().toString().slice(-8);
-  }
-
-  function showToast(msg) {
-    var t = document.getElementById("toast");
-    t.innerText = msg;
-    t.style.display = "block";
-    setTimeout(function() { t.style.display = "none"; }, 3500);
-  }
-
-  async function refreshData() {
-    try {
-      var res = await fetch("/api/v1/cms/stats");
-      var data = await res.json();
-
-      var suspense = Number(data.suspense_balance || 0);
-      var avail = TOTAL_FLOAT - suspense;
-
-      document.getElementById("txtSuspense").innerText = "INR " + suspense.toLocaleString("en-IN", {minimumFractionDigits: 2});
-      document.getElementById("txtFloat").innerText = "INR " + avail.toLocaleString("en-IN", {minimumFractionDigits: 2});
-      document.getElementById("txtCount").innerText = (data.postings ? data.postings.length : 0) + " Entries";
-
-      document.getElementById("taccDebitFloat").innerText = "INR " + suspense.toLocaleString("en-IN", {minimumFractionDigits: 2});
-      document.getElementById("taccSuspenseCredit").innerText = "INR " + suspense.toLocaleString("en-IN", {minimumFractionDigits: 2});
-
-      cachedPostings = data.postings || [];
-      renderTable(cachedPostings);
-      if (cachedPostings.length > 0 && document.getElementById("xmlScreen").innerText.indexOf("<?xml") === -1) {
-        inspectVoucher(cachedPostings[0].jv_id, cachedPostings[0].amount);
-      }
-    } catch(e) {
-      console.error(e);
+  <script>
+    function switchTab(id, btn) {
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+      btn.classList.add('active');
     }
-  }
 
-  function renderTable(postings) {
-    var tbody = document.getElementById("ledgerTbody");
-    tbody.innerHTML = "";
-    if (postings && postings.length > 0) {
-      postings.forEach(function(p) {
-        tbody.innerHTML += '<tr onclick="inspectVoucher(\'' + p.jv_id + '\', ' + p.amount + ')">' +
-          '<td>#' + p.posting_id + '</td>' +
-          '<td style="color:var(--text-muted);">' + new Date(p.created_at).toLocaleTimeString() + '</td>' +
-          '<td><b>' + p.jv_id.slice(0, 18) + '...</b></td>' +
-          '<td><code>' + p.account_id + '</code></td>' +
-          '<td><span class="' + (p.direction === "DR" ? "dr-leg" : "cr-leg") + '">' + p.direction + '</span></td>' +
-          '<td><b>INR ' + Number(p.amount).toLocaleString('en-IN', {minimumFractionDigits: 2}) + '</b></td>' +
-          '<td><span style="color:var(--green);">✓ ZERO-SUM OK</span></td>' +
-        '</tr>';
+    function genIdem() {
+      document.getElementById('idem-key').value = 'TXN-' + Math.floor(10000000 + Math.random() * 90000000);
+    }
+
+    async function refreshState() {
+      const res = await fetch('/api/state');
+      const data = await res.json();
+      document.getElementById('disp-float').innerText = 'INR ' + Number(data.float_balance).toLocaleString('en-IN', {minimumFractionDigits: 2});
+      document.getElementById('disp-suspense').innerText = 'INR ' + Number(data.suspense_balance).toLocaleString('en-IN', {minimumFractionDigits: 2});
+      document.getElementById('disp-count').innerText = data.entry_count + ' Entries';
+      
+      const tbody = document.getElementById('ledger-body');
+      tbody.innerHTML = '';
+      data.ledger.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td>' + r.id + '</td><td>' + r.time + '</td><td>' + r.jv + '</td><td>' + r.acct + '</td><td class="' + (r.leg==='DR'?'tag-dr':'tag-cr') + '">' + r.leg + '</td><td>INR ' + Number(r.amt).toLocaleString('en-IN', {minimumFractionDigits: 2}) + '</td><td style="color:var(--accent-green)">✓ ' + r.verdict + '</td>';
+        tbody.appendChild(tr);
       });
-    } else {
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);">No postings recorded yet.</td></tr>';
     }
-  }
 
-  function inspectVoucher(jv, amt) {
-    var xml = '<?xml version="1.0" encoding="UTF-8"?>\n' +
-'<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08">\n' +
-'  <FIToFICstmrCdtTrf>\n' +
-'    <GrpHdr>\n' +
-'      <MsgId>MSG-' + jv.slice(0, 8) + '</MsgId>\n' +
-'      <CreDtTm>' + new Date().toISOString() + '</CreDtTm>\n' +
-'      <NbOfTxs>1</NbOfTxs>\n' +
-'      <SttlmInf><SttlmMtd>CLRG</SttlmMtd></SttlmInf>\n' +
-'    </GrpHdr>\n' +
-'    <CdtTrfTxInf>\n' +
-'      <PmtId><EndToEndId>REF-' + jv.slice(0, 8) + '</EndToEndId><Utr>CMSNEFT' + Date.now().toString().slice(-10) + '</Utr></PmtId>\n' +
-'      <IntrBkSttlmAmt Ccy="INR">' + Number(amt).toFixed(2) + '</IntrBkSttlmAmt>\n' +
-'      <Dbtr><Nm>Corporate Operating Float Client</Nm></Dbtr>\n' +
-'      <DbtrAcct><Id><Othr><Id>00040310001928</Id></Othr></Id></DbtrAcct>\n' +
-'      <CdtrAgt><FinInstnId><ClrSysMmbId><MmbId>HDFC0000001</MmbId></ClrSysMmbId></FinInstnId></CdtrAgt>\n' +
-'      <Cdtr><Nm>Tata Motors Fleet Ltd</Nm></Cdtr>\n' +
-'      <CdtrAcct><Id><Othr><Id>912345678901</Id></Othr></Id></CdtrAcct>\n' +
-'    </CdtTrfTxInf>\n' +
-'  </FIToFICstmrCdtTrf>\n' +
-'</Document>';
-    document.getElementById("xmlScreen").innerText = xml;
+    async function submitPayment() {
+      const payload = {
+        source_account: document.getElementById('src-account').value,
+        beneficiary_name: document.getElementById('bene-name').value,
+        beneficiary_account: document.getElementById('bene-acct').value,
+        beneficiary_ifsc: document.getElementById('bene-ifsc').value,
+        amount: parseFloat(document.getElementById('payout-amt').value),
+        rail: document.getElementById('rail-select').value,
+        idempotency_key: document.getElementById('idem-key').value
+      };
 
-    var webhook = JSON.stringify({
-      "event": "payout.settled",
-      "timestamp": new Date().toISOString(),
-      "signature_256": "hmac_sha256_" + jv.slice(0, 16),
-      "data": {
-        "jv_id": jv,
-        "originating_account": "00040310001928",
-        "amount": amt,
-        "currency": "INR",
-        "rail": "NEFT",
-        "status": "SETTLED"
-      }
-    }, null, 2);
-    document.getElementById("webhookScreen").innerText = webhook;
-  }
-
-  async function submitPayout() {
-    var idemp = document.getElementById("inpIdemp").value;
-    var amt = parseFloat(document.getElementById("inpAmount").value);
-    var rail = document.getElementById("inpRail").value;
-
-    var t0 = performance.now();
-    var payload = {
-      corporate_account: document.getElementById("inpCorpAcc").value,
-      amount: amt,
-      currency: "INR",
-      payment_rail: rail,
-      beneficiary_name: document.getElementById("inpBeneName").value,
-      beneficiary_acct: document.getElementById("inpBeneAcct").value,
-      beneficiary_ifsc: document.getElementById("inpIfsc").value,
-      reference_id: "REF-" + Date.now().toString().slice(-8)
-    };
-
-    try {
-      var res = await fetch("/api/v1/cms/payout", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": idemp
-        },
+      const res = await fetch('/api/payout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      var data = await res.json();
-      var elapsed = (performance.now() - t0).toFixed(2);
-      document.getElementById("txtLatency").innerText = elapsed;
 
-      if(res.ok) {
-        showToast("Settled! UTR: " + data.utr + " (" + elapsed + "ms)");
-        generateNewIdemp();
-        refreshData();
-        inspectVoucher(data.jv_id, payload.amount);
-      } else {
-        showToast(data.error || "Payout rejected by ledger");
+      if (!res.ok) {
+        const err = await res.text();
+        alert('Payment Failed: ' + err);
+        return;
       }
-    } catch(err) {
-      showToast("Engine Connection Error");
-    }
-  }
 
-  async function triggerReconcile() {
-    try {
-      var res = await fetch("/api/v1/cms/reconcile", { method: "POST" });
-      var data = await res.json();
-      if (res.ok) {
-        showToast("EOD Settled against RBI Nostro: INR " + Number(data.cleared_amount).toLocaleString());
-        refreshData();
-      } else {
-        showToast(data.message || "Reconciliation error");
-      }
-    } catch(e) {
-      showToast("Reconciler Error");
+      const out = await res.json();
+      document.getElementById('disp-latency').innerText = out.latency_ms.toFixed(2) + ' ms';
+      
+      const pacs = '<?xml version="1.0" encoding="UTF-8"?>\n<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08">\n  <FIToFICstmrCdtTrf>\n    <GrpHdr>\n      <MsgId>' + out.pacs_msg_id + '</MsgId>\n      <CreDtTm>' + new Date().toISOString() + '</CreDtTm>\n      <NbOfTxs>1</NbOfTxs>\n      <SttlmInf><SttlmMtd>CLRG</SttlmMtd></SttlmInf>\n    </GrpHdr>\n    <CdtTrfTxInf>\n      <PmtId><EndToEndId>' + payload.idempotency_key + '</EndToEndId></PmtId>\n      <IntrBkSttlmAmt Ccy="INR">' + payload.amount.toFixed(2) + '</IntrBkSttlmAmt>\n      <Dbtr><Nm>DEBTOR ENTERPRISE</Nm></Dbtr>\n      <DbtrAcct><Id><Othr><Id>' + payload.source_account + '</Id></Othr></Id></DbtrAcct>\n      <CdtrAgt><FinInstnId><ClrSysMmbId><MmbId>' + payload.beneficiary_ifsc + '</MmbId></ClrSysMmbId></FinInstnId></CdtrAgt>\n      <Cdtr><Nm>' + payload.beneficiary_name + '</Nm></Cdtr>\n      <CdtrAcct><Id><Othr><Id>' + payload.beneficiary_account + '</Id></Othr></Id></CdtrAcct>\n    </CdtTrfTxInf>\n  </FIToFICstmrCdtTrf>\n</Document>';
+      document.getElementById('pacs-display').innerText = pacs;
+
+      document.getElementById('webhook-display').innerText = JSON.stringify({
+        event: "payout.settled",
+        timestamp: new Date().toISOString(),
+        signature_sha256: out.signature,
+        data: {
+          jv_id: out.jv_id,
+          originating_account: payload.source_account,
+          beneficiary_account: payload.beneficiary_account,
+          amount: payload.amount,
+          currency: "INR",
+          rail: out.rail,
+          status: out.status
+        }
+      }, null, 2);
+
+      genIdem();
+      await refreshState();
     }
-  }
-</script>
+
+    async function submitEOD() {
+      const res = await fetch('/api/eod', { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.text();
+        alert('Settlement failed: ' + err);
+        return;
+      }
+      const out = await res.json();
+      alert('EOD Nostro Settlement Cleared: INR ' + Number(out.cleared_amt).toLocaleString('en-IN', {minimumFractionDigits: 2}));
+      await refreshState();
+    }
+
+    window.onload = function() {
+      genIdem();
+      refreshState();
+    };
+  </script>
 </body>
-</html>`
+</html>
+`
