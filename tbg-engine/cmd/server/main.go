@@ -67,7 +67,7 @@ var state = EngineState{
 	},
 }
 
-// 1. Double-Entry Balance & Journal State
+// 1. Balance & Ledger State API
 func handleGetLedger(w http.ResponseWriter, r *http.Request) {
 	state.Lock()
 	defer state.Unlock()
@@ -418,7 +418,7 @@ func handleTradeFinanceLC(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// 8. EOD Nostro Clearing
+// 8. EOD Central Bank Settlement Discharge
 func handleEODNostro(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost { return }
 	start := time.Now()
@@ -452,18 +452,13 @@ func handleEODNostro(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(fullOpenAPISpecJSON))
-}
-
 func handleIndex(w http.ResponseWriter, r *http.Request) {
-	// If Option B compiled dist exists, serve it
+	// Option B: Serve Vite production dist if built
 	if _, err := os.Stat("tbg-ui/dist/index.html"); err == nil {
 		http.ServeFile(w, r, "tbg-ui/dist/index.html")
 		return
 	}
-	// Otherwise serve polished Option A UI
+	// Option A: Clean, high-density Tailwind embedded UI
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write([]byte(optionAHTML))
 }
@@ -481,7 +476,6 @@ func main() {
 	}
 
 	http.HandleFunc("/", handleIndex)
-	http.HandleFunc("/openapi.json", handleOpenAPISpec)
 
 	// Institutional Headless API Endpoints (All Transaction Products)
 	http.HandleFunc("/api/v1/ledger", handleGetLedger)
@@ -498,159 +492,6 @@ func main() {
 		log.Fatalf("Server startup failed: %v", err)
 	}
 }
-
-const fullOpenAPISpecJSON = `{
-  "openapi": "3.1.0",
-  "info": {
-    "title": "TBG CORE // Institutional Transaction Banking Platform",
-    "description": "Comprehensive Core Transaction Banking Switch supporting Domestic ISO 20022 Rails, Cross-Border SWIFT CBPR+, Receivables Reconciliation (VAN), RERA Dual-Escrow Separation, Zero-Balance Concentration Sweeps (ZBA), and Documentary Trade Finance (MT700 LC).",
-    "version": "4.2.0"
-  },
-  "servers": [{ "url": "/", "description": "Active Gateway Node" }],
-  "paths": {
-    "/api/v1/ledger": {
-      "get": {
-        "summary": "Core Double-Entry Postings Ledger",
-        "description": "Retrieves the immutable journal voucher ledger with real-time balance sheet proving zero-sum invariance.",
-        "responses": { "200": { "description": "Full Postings Ledger" } }
-      }
-    },
-    "/api/v1/payouts/domestic": {
-      "post": {
-        "summary": "Domestic Multi-Rail Payout (ISO 20022)",
-        "description": "Smart-routes across RTGS/NEFT/UPI, executes double-entry hold, and emits pacs.008 XML & HMAC-SHA256 webhooks.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "example": {
-                "source_account": "00040310001928",
-                "beneficiary_name": "Tata Motors Commercial Fleet Ltd",
-                "beneficiary_account": "912345678901",
-                "beneficiary_ifsc": "HDFC0000001",
-                "amount": 250000,
-                "rail": "AUTO",
-                "idempotency_key": "TXN-89012391"
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "Settled with pacs.008 schema payload" } }
-      }
-    },
-    "/api/v1/payouts/cross-border": {
-      "post": {
-        "summary": "SWIFT CBPR+ Cross-Border Wire (MT103)",
-        "description": "Dispatches customer credit transfers over SWIFT CBPR+ with UETR references, emitting valid FIN MT103 wire blocks.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "example": {
-                "source_account": "CORP_US_FLOAT_0029",
-                "beneficiary_name": "Airbus Operations GmbH",
-                "beneficiary_iban": "DE89370400440532013000",
-                "beneficiary_bic": "DBEUMM21XXX",
-                "intermediary_bic": "CHASUS33XXX",
-                "amount": 250000,
-                "currency": "USD",
-                "charge_bearer": "OUR",
-                "idempotency_key": "E2E-44910281"
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "Dispatched with SWIFT MT103 block" } }
-      }
-    },
-    "/api/v1/receivables/van-collection": {
-      "post": {
-        "summary": "Virtual Account (VAN) Collection Reconciliation",
-        "description": "Directly ingests inward remittances onto client VANs, matching invoices and settling client operating float.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "example": {
-                "virtual_account": "VAN-90812-INV44",
-                "remitter_entity": "Reliance Retail Operations",
-                "remitter_ifsc": "SBIN0001041",
-                "amount": 1850000,
-                "invoice_reference": "INV-2026-SEP-091"
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "Matched and credited to float" } }
-      }
-    },
-    "/api/v1/escrow/rera-split": {
-      "post": {
-        "summary": "RERA Section 4(2)(l)(D) Escrow Separation",
-        "description": "Splits buyer consideration into 70% unencumbered site construction escrow and 30% operational account.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "example": {
-                "project_id": "PRJ-MAHARERA-PUNE-2026-904",
-                "buyer_van": "VAN-PUNE-TWR-801",
-                "amount": 5000000
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "Allocated 70/30 with balanced journal" } }
-      }
-    },
-    "/api/v1/liquidity/zba-sweep": {
-      "post": {
-        "summary": "Zero-Balance Account (ZBA) Liquidity Sweep",
-        "description": "Sweeps idle subsidiary current account balances into the master corporate concentration pool.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "example": {
-                "subsidiary_account": "SUBSIDIARY_PUNE_PLANT_4021",
-                "sweep_amount": 2500000
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "Concentrated into master liquidity pool" } }
-      }
-    },
-    "/api/v1/trade-finance/lc-drawdown": {
-      "post": {
-        "summary": "Documentary Credit / Letter of Credit (MT700 Engine)",
-        "description": "Releases 100% cash margin collateral and settles beneficiary advising bank against presented clean documents.",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "example": {
-                "lc_reference": "DLC-2026-MUM-8911",
-                "applicant_name": "Bharat Steel & Infrastructure Ltd",
-                "beneficiary_name": "Nippon Steel Heavy Industries Corp",
-                "issuing_bank_bic": "BOTKJPJTXXX",
-                "drawdown_amount_inr": 5000000
-              }
-            }
-          }
-        },
-        "responses": { "200": { "description": "Settled with MT700 wire generation" } }
-      }
-    },
-    "/api/v1/recon/eod-nostro": {
-      "post": {
-        "summary": "EOD Central Bank Nostro Settlement",
-        "description": "Reconciles outstanding CMS Suspense transit liabilities against the central bank Nostro clearing ledger.",
-        "responses": { "200": { "description": "Discharged against central bank Nostro" } }
-      }
-    }
-  }
-}`
 
 const optionAHTML = `<!DOCTYPE html>
 <html lang="en">
@@ -680,7 +521,7 @@ const optionAHTML = `<!DOCTYPE html>
   <header class="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm">
     <div class="flex items-center space-x-3">
       <span class="font-mono font-bold text-sm tracking-tight text-slate-900">TBG CORE // TREASURY</span>
-      <span class="bg-sky-50 text-sky-700 border border-sky-200 font-mono text-[10px] font-semibold px-2 py-0.5 rounded">FULL PRODUCT SUITE</span>
+      <span class="bg-sky-50 text-sky-700 border border-sky-200 font-mono text-[10px] font-semibold px-2 py-0.5 rounded">FULL TRANSACTION SUITE</span>
     </div>
     <div class="font-mono text-[11px] text-slate-500">
       POSTGRESQL 16 ACID <span class="mx-1">•</span> INVARIANT: &Sigma;DR - &Sigma;CR = 0 <span class="mx-1">•</span> LATENCY P99: 0.98ms
@@ -728,6 +569,7 @@ const optionAHTML = `<!DOCTYPE html>
       <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1 pt-4">Architecture & Docs</div>
       <button onclick="tab('view-architecture', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">7. Vector Architecture Flow</button>
       <button onclick="tab('view-prd', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">8. Institutional PRD</button>
+      <button onclick="tab('view-glossary', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">9. Banking Glossary</button>
     </aside>
 
     <!-- Main Content -->
@@ -1066,6 +908,36 @@ const optionAHTML = `<!DOCTYPE html>
         </div>
       </div>
 
+      <!-- 9. BANKING GLOSSARY -->
+      <div id="view-glossary" class="tab-panel hidden">
+        <div class="grid grid-cols-3 gap-4">
+          <div class="bg-white border border-slate-200 rounded shadow-sm p-4">
+            <div class="font-bold font-mono text-sky-700 text-xs uppercase mb-1">pacs.008 (ISO 20022)</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Financial Customer Credit Transfer message. The interbank standard for moving wholesale funds between financial institutions across RTGS, NEFT, and SWIFT CBPR+.</p>
+          </div>
+          <div class="bg-white border border-slate-200 rounded shadow-sm p-4">
+            <div class="font-bold font-mono text-sky-700 text-xs uppercase mb-1">CMS Suspense Account</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Internal clearing transit ledger representing the bank's liability to clearing houses before daily multilateral net settlement against the central bank Nostro.</p>
+          </div>
+          <div class="bg-white border border-slate-200 rounded shadow-sm p-4">
+            <div class="font-bold font-mono text-sky-700 text-xs uppercase mb-1">SWIFT FIN MT103</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Single customer credit transfer format containing Tag 20 (Reference), Tag 32A (Value Date/Amount), Tag 50K (Ordering Customer), and mandatory UETR identifiers.</p>
+          </div>
+          <div class="bg-white border border-slate-200 rounded shadow-sm p-4">
+            <div class="font-bold font-mono text-sky-700 text-xs uppercase mb-1">Zero-Balance Account (ZBA)</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Subsidiary account whose balance is swept to or funded from a central master concentration pool at cutoff to maximize overnight repo yield.</p>
+          </div>
+          <div class="bg-white border border-slate-200 rounded shadow-sm p-4">
+            <div class="font-bold font-mono text-sky-700 text-xs uppercase mb-1">Virtual Account (VAN)</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Shadow routing identifier mapped directly to a client pool account for automated reconciliation without opening thousands of distinct bank accounts.</p>
+          </div>
+          <div class="bg-white border border-slate-200 rounded shadow-sm p-4">
+            <div class="font-bold font-mono text-sky-700 text-xs uppercase mb-1">Documentary Credit (MT700)</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Irrevocable undertaking issued by an issuing bank guaranteeing payment upon presentation of compliant shipping documents under UCP 600 rules.</p>
+          </div>
+        </div>
+      </div>
+
     </main>
   </div>
 
@@ -1148,7 +1020,7 @@ const optionAHTML = `<!DOCTYPE html>
         intermediary_bic: document.getElementById('cb-int').value,
         amount: parseFloat(document.getElementById('cb-amt').value),
         currency: 'USD',
-        charge_bearer: document.getElementById('cb-chrg').value,
+        charge_bearer: 'OUR',
         idempotency_key: 'E2E-' + Math.floor(10000000 + Math.random() * 90000000)
       };
       const res = await fetch('/api/v1/payouts/cross-border', {
