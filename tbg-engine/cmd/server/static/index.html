@@ -13,8 +13,17 @@
       theme: {
         extend: {
           fontFamily: {
-            sans: ['Inter', 'sans-serif'],
-            mono: ['JetBrains Mono', 'monospace'],
+            sans: ['Inter', -apple-system, 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+          },
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+            }
           }
         }
       }
@@ -22,7 +31,7 @@
   </script>
   <style>
     .canvas-dot-grid {
-      background-size: 24px 24px;
+      background-size: 20px 20px;
       background-image: radial-gradient(circle, #cbd5e1 1.2px, transparent 1.2px);
     }
     .flow-cable {
@@ -42,7 +51,7 @@
       cursor: grabbing;
     }
     .draggable-node:hover {
-      box-shadow: 0 10px 25px -5px rgba(2, 132, 199, 0.25);
+      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
     }
   </style>
 </head>
@@ -52,11 +61,11 @@
   <header class="bg-white border-b border-slate-200 px-6 py-2.5 flex justify-between items-center sticky top-0 z-50 shadow-sm h-12">
     <div class="flex items-center space-x-3">
       <span class="font-mono font-bold text-sm tracking-tight text-slate-900">TBG CORE // TREASURY</span>
-      <span class="bg-sky-50 text-sky-700 border border-sky-200 font-mono text-[10px] font-semibold px-2 py-0.5 rounded">UNIFIED ARCHITECTURE WORKBENCH</span>
+      <span class="bg-slate-100 text-slate-700 border border-slate-200 font-mono text-[10px] font-semibold px-2 py-0.5 rounded">UNIFIED ARCHITECTURE WORKBENCH</span>
     </div>
     <div class="flex items-center space-x-4">
-      <button onclick="runLiveSimulation()" id="btn-trace" class="bg-sky-600 hover:bg-sky-700 text-white font-semibold px-3 py-1 rounded flex items-center space-x-1.5 transition text-xs shadow-sm">
-        <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+      <button onclick="runLiveSimulation()" id="btn-trace" class="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-3 py-1.5 rounded flex items-center space-x-1.5 transition text-xs shadow-sm">
+        <svg class="w-3.5 h-3.5 fill-current text-sky-400" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
         <span>Execute Node Tracer</span>
       </button>
       <div class="font-mono text-[11px] text-slate-500 border-l border-slate-200 pl-4">
@@ -85,7 +94,7 @@
     </div>
     <div class="bg-white p-2.5 px-5 flex flex-col justify-center">
       <div class="text-[9.5px] uppercase tracking-wider font-semibold text-slate-400">Trade LC Cash Margin</div>
-      <div class="font-mono text-sm font-semibold text-purple-700" id="m-lc-margin">INR 2,50,00,000.00</div>
+      <div class="font-mono text-sm font-semibold text-indigo-700" id="m-lc-margin">INR 2,50,00,000.00</div>
     </div>
     <div class="bg-white p-2.5 px-5 flex flex-col justify-center">
       <div class="text-[9.5px] uppercase tracking-wider font-semibold text-slate-400">Audited Ledger Postings</div>
@@ -97,7 +106,7 @@
     <!-- Sidebar -->
     <aside class="col-span-2 bg-white border-r border-slate-200 p-3 space-y-1 overflow-y-auto">
       <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1">Canvas & Visualizer</div>
-      <button onclick="tab('view-canvas', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100 active bg-sky-50 text-sky-700 font-semibold border border-sky-200">
+      <button onclick="tab('view-canvas', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100 active bg-slate-100 text-slate-900 font-semibold border border-slate-200">
         <span>⚡ Draggable Node Canvas</span>
       </button>
 
@@ -122,7 +131,7 @@
         <div class="bg-white border-b border-slate-200 px-6 py-2 flex justify-between items-center z-10 shadow-sm h-10">
           <div class="flex items-center space-x-3">
             <span class="text-[11px] font-bold text-slate-500 uppercase">Architecture Rail:</span>
-            <select id="canvas-product-select" onchange="switchArchitectureFlow(this.value)" class="bg-slate-50 border border-slate-300 font-mono text-xs font-semibold px-2 py-0.5 rounded outline-none text-sky-800">
+            <select id="canvas-product-select" onchange="switchArchitectureFlow(this.value)" class="bg-slate-50 border border-slate-300 font-mono text-xs font-semibold px-2 py-0.5 rounded outline-none text-slate-800">
               <option value="domestic">Domestic Multi-Rail Outward (RTGS/NEFT/UPI)</option>
               <option value="cbpr">Cross-Border SWIFT CBPR+ (MT103 / pacs.008)</option>
               <option value="van">Receivables & Virtual Account (VAN) Matching</option>
@@ -154,7 +163,7 @@
           <div class="p-4 flex-1 overflow-y-auto space-y-3.5">
             <div>
               <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Source & Destination Flow</label>
-              <div class="bg-sky-50 border border-sky-100 p-2 rounded font-mono text-[11px] text-sky-900 font-semibold" id="dr-path"></div>
+              <div class="bg-slate-100 border border-slate-200 p-2 rounded font-mono text-[11px] text-slate-900 font-semibold" id="dr-path"></div>
             </div>
             <div>
               <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Operational Role & Rule</label>
@@ -166,7 +175,519 @@
             </div>
             <div>
               <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">State Packet / Payload</label>
-              <pre class="bg-slate-900 text-sky-400 p-3 rounded font-mono text-[10.5px] max-h-56 overflow-auto" id="dr-payload"></pre>
+              <pre class="bg-slate-900 text-slate-200 p-3 rounded font-mono text-[10.5px] max-h-56 overflow-auto border border-slate-800" id="dr-payload"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. DOMESTIC PAYOUT -->
+      <div id="view-payout" class="tab-panel hidden p-6 overflow-y-auto h-full">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">Execute Outward Payout</h2>
+            <form onsubmit="event.preventDefault(); submitDomestic();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Debtor Account</label>
+                <input type="text" id="p-src" value="00040310001928" readonly class="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded font-mono text-xs text-slate-600">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary Name</label>
+                <input type="text" id="p-bene" value="Tata Motors Fleet Ltd" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary Account</label>
+                <input type="text" id="p-acct" value="912345678901" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">IFSC Code</label>
+                <input type="text" id="p-ifsc" value="HDFC0000001" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Amount (INR)</label>
+                <input type="number" id="p-amt" value="250000" min="1" step="0.01" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Clearing Rail</label>
+                <select id="p-rail" class="w-full border border-slate-300 px-2 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+                  <option value="AUTO">SMART_ROUTE (Latency / Cost Matrix)</option>
+                  <option value="RTGS">RTGS (High-Value Gross Settlement)</option>
+                  <option value="NEFT">NEFT (Batch Clearing - RBI SFMS)</option>
+                  <option value="IMPS">IMPS (24x7 Real-Time Switch)</option>
+                </select>
+              </div>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Dispatch Idempotent Transfer</button>
+              <button type="button" onclick="submitEOD()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-1.5 rounded text-xs transition">Trigger EOD Nostro Settlement</button>
+            </form>
+          </div>
+          <div class="col-span-8 space-y-4">
+            <div class="bg-white border border-slate-200 rounded shadow-sm overflow-hidden">
+              <div class="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex justify-between items-center">
+                <span class="font-bold text-slate-700 text-xs uppercase tracking-wide">Double-Entry Journal Postings</span>
+                <span class="text-emerald-700 bg-emerald-50 border border-emerald-200 font-mono text-[10px] font-semibold px-2 py-0.5 rounded">✓ ZERO-SUM VERIFIED</span>
+              </div>
+              <div class="overflow-x-auto max-h-72">
+                <table class="w-full text-left font-mono text-[11px]">
+                  <thead class="bg-slate-100 text-slate-500 border-b border-slate-200 sticky top-0">
+                    <tr>
+                      <th class="p-2.5">ID</th><th class="p-2.5">JV ID</th><th class="p-2.5">Account</th><th class="p-2.5">Leg</th><th class="p-2.5">Amount</th><th class="p-2.5">Module</th><th class="p-2.5">Narrative</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ledger-rows" class="divide-y divide-slate-100"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div class="bg-white border border-slate-200 rounded shadow-sm p-3">
+                <div class="text-[10px] font-bold text-slate-500 uppercase mb-2">ISO 20022 PACS.008 XML</div>
+                <pre id="pacs-box" class="bg-slate-900 text-slate-200 p-3 rounded font-mono text-[10.5px] max-h-48 overflow-auto border border-slate-800">&lt;!-- Dispatched pacs.008 schema payload will stream here --&gt;</pre>
+              </div>
+              <div class="bg-white border border-slate-200 rounded shadow-sm p-3">
+                <div class="text-[10px] font-bold text-slate-500 uppercase mb-2">ERP Webhook Dispatch</div>
+                <pre id="webhook-box" class="bg-slate-900 text-slate-200 p-3 rounded font-mono text-[10.5px] max-h-48 overflow-auto border border-slate-800">/* Signed HMAC-SHA256 ERP webhook payload */</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. SWIFT CBPR+ -->
+      <div id="view-cbpr" class="tab-panel hidden p-6 overflow-y-auto h-full">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">SWIFT MT103 / CBPR+ Outward</h2>
+            <form onsubmit="event.preventDefault(); submitCBPR();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Source Account</label>
+                <input type="text" id="cb-src" value="CORP_US_FLOAT_0029" readonly class="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded font-mono text-xs text-slate-600">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary Name</label>
+                <input type="text" id="cb-bene" value="Airbus Operations GmbH" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary IBAN</label>
+                <input type="text" id="cb-iban" value="DE89370400440532013000" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary BIC</label>
+                <input type="text" id="cb-bic" value="DBEUMM21XXX" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Intermediary BIC</label>
+                <input type="text" id="cb-int-bic" value="CHASUS33XXX" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Amount (USD)</label>
+                <input type="number" id="cb-amt" value="250000" min="100" step="0.01" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Dispatch SWIFT MT103</button>
+            </form>
+          </div>
+          <div class="col-span-8 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h3 class="font-bold text-slate-800 text-xs uppercase tracking-wide mb-2">Generated SWIFT FIN MT103 Wire Block</h3>
+            <pre id="swift-box" class="bg-slate-900 text-slate-200 p-4 rounded font-mono text-xs max-h-96 overflow-auto border border-slate-800">/* Dispatched MT103 block will appear here */</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. VIRTUAL ACCOUNTS (VAN) -->
+      <div id="view-van" class="tab-panel hidden p-6 overflow-y-auto h-full">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">Receivables & VAN Matching</h2>
+            <form onsubmit="event.preventDefault(); submitVAN();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Virtual Account (VAN)</label>
+                <input type="text" id="van-acct" value="VAN-90812-INV44" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Remitter Entity Name</label>
+                <input type="text" id="van-remitter" value="Reliance Retail Operations" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Remitter IFSC</label>
+                <input type="text" id="van-ifsc" value="SBIN0001041" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Invoice Reference</label>
+                <input type="text" id="van-inv" value="INV-2026-SEP-091" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Collection Amount (INR)</label>
+                <input type="number" id="van-amt" value="1850000" min="100" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Ingest & Auto-Reconcile VAN</button>
+            </form>
+          </div>
+          <div class="col-span-8 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h3 class="font-bold text-slate-800 text-xs uppercase tracking-wide mb-2">VAN Auto-Reconciliation Event Log</h3>
+            <pre id="van-box" class="bg-slate-900 text-emerald-400 p-4 rounded font-mono text-xs max-h-96 overflow-auto border border-slate-800">/* VAN Remittance output will stream here */</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. RERA ESCROW -->
+      <div id="view-rera" class="tab-panel hidden p-6 overflow-y-auto h-full">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">RERA Section 4 Dual-Escrow Split</h2>
+            <form onsubmit="event.preventDefault(); submitRera();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Project ID</label>
+                <input type="text" value="PRJ-MAHARERA-PUNE-2026-904" readonly class="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded font-mono text-xs text-slate-600">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Homebuyer VAN</label>
+                <input type="text" id="rera-van" value="VAN-PUNE-TWR-801" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Consideration Amount (INR)</label>
+                <input type="number" id="rera-amt" value="5000000" min="1000" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Execute Escrow Split</button>
+            </form>
+          </div>
+          <div class="col-span-8 space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+              <div class="bg-white border-l-4 border-slate-900 border border-slate-200 p-4 rounded shadow-sm">
+                <div class="text-[10px] uppercase font-bold text-slate-400">70% Dedicated Project Escrow</div>
+                <div class="font-mono text-lg font-bold text-slate-900 mt-1" id="box-rera-70">INR 7,00,00,000.00</div>
+              </div>
+              <div class="bg-white border-l-4 border-emerald-600 border border-slate-200 p-4 rounded shadow-sm">
+                <div class="text-[10px] uppercase font-bold text-slate-400">30% Operational Current Account</div>
+                <div class="font-mono text-lg font-bold text-emerald-700 mt-1" id="box-rera-30">INR 3,00,00,000.00</div>
+              </div>
+            </div>
+            <pre id="rera-box" class="bg-slate-900 text-slate-200 p-4 rounded font-mono text-xs max-h-60 overflow-auto border border-slate-800">/* RERA Execution output will appear here */</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6. LIQUIDITY SWEEPS -->
+      <div id="view-zba" class="tab-panel hidden p-6 overflow-y-auto h-full">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">Zero-Balance Sweeper (ZBA)</h2>
+            <form onsubmit="event.preventDefault(); submitSweep();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Subsidiary ZBA Account</label>
+                <input type="text" id="zba-acct" value="SUBSIDIARY_PUNE_PLANT_4021" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Sweep Amount (INR)</label>
+                <input type="number" id="zba-amt" value="2500000" min="1000" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Execute Cash Sweep</button>
+            </form>
+          </div>
+          <div class="col-span-8 space-y-4">
+            <div class="bg-white border-l-4 border-emerald-600 border border-slate-200 p-4 rounded shadow-sm">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Concentrated Master Pool</div>
+              <div class="font-mono text-xl font-bold text-emerald-700 mt-1" id="box-pool">INR 8,50,00,000.00</div>
+            </div>
+            <pre id="sweep-box" class="bg-slate-900 text-slate-200 p-4 rounded font-mono text-xs max-h-60 overflow-auto border border-slate-800">/* Sweep execution journal output */</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. TRADE FINANCE (LC) -->
+      <div id="view-lc" class="tab-panel hidden p-6 overflow-y-auto h-full">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">Letter of Credit Drawdown</h2>
+            <form onsubmit="event.preventDefault(); submitLC();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">LC Reference</label>
+                <input type="text" id="lc-ref" value="DLC-2026-MUM-8911" readonly class="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded font-mono text-xs text-slate-600">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Applicant Name</label>
+                <input type="text" id="lc-applicant" value="Bharat Steel & Infrastructure Ltd" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary Name</label>
+                <input type="text" id="lc-bene" value="Nippon Steel Heavy Industries Corp" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Advising BIC</label>
+                <input type="text" id="lc-bic" value="BOTKJPJTXXX" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Drawdown Amount (INR)</label>
+                <input type="number" id="lc-amt" value="5000000" min="1000" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold focus:ring-1 focus:ring-slate-900 outline-none">
+              </div>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Honor Documents & Drawdown</button>
+            </form>
+          </div>
+          <div class="col-span-8 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h3 class="font-bold text-slate-800 text-xs uppercase tracking-wide mb-2">Generated SWIFT FIN MT700 Record</h3>
+            <pre id="lc-box" class="bg-slate-900 text-slate-200 p-4 rounded font-mono text-xs max-h-96 overflow-auto border border-slate-800">/* Dispatched MT700 will appear here */</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- 8. INSTITUTIONAL PRD -->
+      <div id="view-prd" class="tab-panel hidden p-8 space-y-6 overflow-y-auto h-full">
+        <div class="bg-white border border-slate-200 rounded shadow-sm p-6 space-y-4">
+          <div class="border-b border-slate-100 pb-3">
+            <span class="text-[10px] font-mono uppercase font-bold text-slate-600">SYSTEM ARCHITECTURE SPECIFICATION</span>
+            <h1 class="text-base font-bold text-slate-900 mt-1">TBG-CORE Product Requirement Document (PRD v4.2)</h1>
+          </div>
+          <div>
+            <h3 class="font-bold text-xs text-slate-800 uppercase tracking-wide mb-1">1. Architectural Mandate</h3>
+            <p class="text-slate-600 text-xs leading-relaxed">
+              TBG-CORE functions as the centralized clearing orchestrator and transaction banking switch for Scheduled Commercial Banks and large-scale FinTech aggregators. It decouples high-volume customer initiation from downstream interbank clearing houses, preventing settlement leakage, daylight overdraft anomalies, and double-debit states.
+            </p>
+          </div>
+          <div>
+            <h3 class="font-bold text-xs text-slate-800 uppercase tracking-wide mb-1">2. Core Regulatory Invariants</h3>
+            <div class="space-y-2 text-xs text-slate-600">
+              <div class="bg-slate-50 border border-slate-200 p-3 rounded">
+                <strong class="text-slate-900">Invariant I: Strict Double-Entry Postings (&Sigma;DR = &Sigma;CR)</strong><br>
+                Under Basel III guidelines, atomic balance holds are mandatory. An outward payout must instantly debit Corporate Operating Float and credit CMS Suspense. The bank assumes liability on its internal books prior to dispatching interbank wire instructions.
+              </div>
+              <div class="bg-slate-50 border border-slate-200 p-3 rounded">
+                <strong class="text-slate-900">Invariant II: Distributed Idempotency Locks</strong><br>
+                All execution requests require unique client UUID/HMAC keys. Duplicate submissions over flakey networks are intercepted before reaching ledger memory, returning the prior settlement state without re-executing balance debits.
+              </div>
+              <div class="bg-slate-50 border border-slate-200 p-3 rounded">
+                <strong class="text-slate-900">Invariant III: RERA Section 4(2)(l)(D) Ring-Fencing</strong><br>
+                Homebuyer remittances to registered real estate project Virtual Accounts are automatically partitioned at ingress: exactly 70% is ring-fenced for certified site construction expenses, and 30% is released to operational current accounts.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 9. BANKING GLOSSARY -->
+      <div id="view-glossary" class="tab-panel hidden p-8 overflow-y-auto h-full">
+        <div class="grid grid-cols-3 gap-4">
+          <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">pacs.008 (ISO 20022)</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Financial Customer Credit Transfer. Interbank standard for wholesale transfers across RTGS, NEFT, and SWIFT CBPR+.</p>
+          </div>
+          <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">CMS Suspense Account</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Internal clearing transit ledger representing the bank's liability to clearing houses before daily multilateral net settlement.</p>
+          </div>
+          <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">SWIFT FIN MT103</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Single customer credit transfer format containing Tag 20, Tag 32A, Tag 50K, and mandatory UETR tracking references.</p>
+          </div>
+          <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">Zero-Balance Account (ZBA)</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Subsidiary account swept to a central master pool at cutoff to eliminate idle cash and optimize overnight repo yields.</p>
+          </div>
+          <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">Virtual Account (VAN)</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Shadow routing identifier mapped directly to a client pool account for automated reconciliation without opening thousands of distinct accounts.</p>
+          </div>
+          <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">Documentary Credit (MT700)</div>
+            <p class="text-slate-600 text-xs leading-relaxed">Irrevocable undertaking issued by an issuing bank guaranteeing payment upon presentation of compliant documents under UCP 600 rules.</p>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <script>
+    // Professional monochrome & tinted vector icons
+    const vectorIcons = {
+      erp: '<svg class="w-3.5 h-3.5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>',
+      ingress: '<svg class="w-3.5 h-3.5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>',
+      ledger: '<svg class="w-3.5 h-3.5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/></svg>',
+      router: '<svg class="w-3.5 h-3.5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>',
+      clearing: '<svg class="w-3.5 h-3.5 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-Here is the complete, production-grade upgrade designed specifically to match high-tier enterprise fintech platforms (e.g., Stripe Treasury, Modern Treasury, and Finacle Treasury). 
+
+### Architectural Enhancements:
+1. **Design System & Typography:**
+   - Slate-900 high-contrast neutral backgrounds with cool-grey surfaces, eliminating amateur gradients and oversaturated borders.
+   - Micro-typography utilizing Inter and JetBrains Mono with tabular numerics (`font-variant-numeric: tabular-nums`) for exact decimal alignment.
+   - Clean, institutional badge tags, subtle separators, and muted neutral cables (`#94a3b8`) that activate into distinct state indicators during traces.
+2. **True Visual Vectors & n8n Dynamic Connectors:**
+   - Color-coded protocol badges for each node (Ingress, Validation, Double-Entry, Routing, Settlement).
+   - Draggable node handles with dynamic cubic bezier path recalibration in pure SVG.
+   - Hop-by-hop packet inspection drawer displaying active payloads, routing criteria, and regulatory citations.
+3. **Optimized Zero-Dependency Build:**
+   - Uses Go's native `//go:embed` to package the static interface directly inside the binary, eliminating Go template delimiter collisions, runtime file-not-found errors, and complex Docker multi-stage dependencies.
+
+---
+
+### Step 1: Run This Complete Script in Codespaces (`/workspaces/TBG-Engine-`)
+
+Copy and paste this single script into your terminal to compile and deploy the updated setup:
+
+```bash
+mkdir -p tbg-engine/cmd/server/static
+
+# 1. Production UI with Clean Vector Graphics & n8n Canvas
+cat << 'EOF_HTML' > tbg-engine/cmd/server/static/index.html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TBG CORE // Wholesale Transaction Banking Engine</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+  <link rel="preconnect" href="[https://fonts.googleapis.com](https://fonts.googleapis.com)">
+  <link rel="preconnect" href="[https://fonts.gstatic.com](https://fonts.gstatic.com)" crossorigin>
+  <link href="[https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap](https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap)" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    .canvas-dot-grid {
+      background-size: 20px 20px;
+      background-image: radial-gradient(circle, #cbd5e1 1px, transparent 1px);
+    }
+    .flow-cable {
+      stroke-dasharray: 6;
+      animation: dash 1s linear infinite;
+    }
+    @keyframes dash {
+      to { stroke-dashoffset: -12; }
+    }
+    .draggable-node {
+      position: absolute;
+      user-select: none;
+      touch-action: none;
+      transition: box-shadow 0.15s ease, border-color 0.15s ease;
+    }
+    .draggable-node:hover {
+      box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased text-xs select-none overflow-hidden">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-slate-200 px-6 py-2.5 flex justify-between items-center sticky top-0 z-50 h-12 shadow-sm">
+    <div class="flex items-center space-x-3">
+      <span class="font-mono font-bold text-sm tracking-tight text-slate-900">TBG CORE // TREASURY</span>
+      <span class="bg-slate-100 text-slate-700 border border-slate-200 font-mono text-[10px] font-semibold px-2 py-0.5 rounded">INSTITUTIONAL WORKBENCH</span>
+    </div>
+    <div class="flex items-center space-x-4">
+      <button onclick="runLiveSimulation()" id="btn-trace" class="bg-slate-900 hover:bg-slate-800 text-white font-semibold px-3 py-1 rounded flex items-center space-x-1.5 transition text-xs shadow-sm">
+        <svg class="w-3.5 h-3.5 fill-current text-sky-400" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        <span>Trace Transaction Lifecycle</span>
+      </button>
+      <div class="font-mono text-[11px] text-slate-500 border-l border-slate-200 pl-4">
+        POSTGRESQL 16 ACID <span class="mx-1">•</span> &Sigma;DR - &Sigma;CR = 0 <span class="mx-1">•</span> P99: 0.98ms
+      </div>
+    </div>
+  </header>
+
+  <!-- Metrics Ribbon -->
+  <div class="grid grid-cols-6 bg-slate-200 gap-px border-b border-slate-200 h-14">
+    <div class="bg-white p-2.5 px-5 flex flex-col justify-center">
+      <div class="text-[9.5px] uppercase tracking-wider font-semibold text-slate-400">Corporate Operating Float</div>
+      <div class="font-mono text-sm font-semibold text-slate-900" id="m-float-inr">INR 9,97,50,000.00</div>
+    </div>
+    <div class="bg-white p-2.5 px-5 flex flex-col justify-center">
+      <div class="text-[9.5px] uppercase tracking-wider font-semibold text-slate-400">Transit Clearing Suspense</div>
+      <div class="font-mono text-sm font-semibold text-amber-600" id="m-suspense-inr">INR 0.00</div>
+    </div>
+    <div class="bg-white p-2.5 px-5 flex flex-col justify-center">
+      <div class="text-[9.5px] uppercase tracking-wider font-semibold text-slate-400">USD Operating Float</div>
+      <div class="font-mono text-sm font-semibold text-sky-700" id="m-float-usd">USD 3,500,000.00</div>
+    </div>
+    <div class="bg-white p-2.5 px-5 flex flex-col justify-center">
+      <div class="text-[9.5px] uppercase tracking-wider font-semibold text-slate-400">RERA 70% Escrow Hold</div>
+      <div class="font-mono text-sm font-semibold text-slate-900" id="m-rera-escrow">INR 7,00,00,000.00</div>
+    </div>
+    <div class="bg-white p-2.5 px-5 flex flex-col justify-center">
+      <div class="text-[9.5px] uppercase tracking-wider font-semibold text-slate-400">Trade LC Cash Margin</div>
+      <div class="font-mono text-sm font-semibold text-purple-700" id="m-lc-margin">INR 2,50,00,000.00</div>
+    </div>
+    <div class="bg-white p-2.5 px-5 flex flex-col justify-center">
+      <div class="text-[9.5px] uppercase tracking-wider font-semibold text-slate-400">Audited Ledger Postings</div>
+      <div class="font-mono text-sm font-semibold text-emerald-600" id="m-postings-count">4 Entries</div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-12 h-[calc(100vh-104px)]">
+    <!-- Sidebar -->
+    <aside class="col-span-2 bg-white border-r border-slate-200 p-3 space-y-1 overflow-y-auto">
+      <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1">Interactive Architecture</div>
+      <button onclick="tab('view-canvas', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100 active bg-slate-100 text-slate-900 font-semibold border border-slate-300">
+        <span>⚡ Flow & Settlement Graph</span>
+      </button>
+
+      <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1 pt-3">Product Workbenches</div>
+      <button onclick="tab('view-payout', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">1. Domestic Multi-Rail (ISO)</button>
+      <button onclick="tab('view-cbpr', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">2. SWIFT CBPR+ (MT103)</button>
+      <button onclick="tab('view-van', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">3. Virtual Accounts (VAN)</button>
+      <button onclick="tab('view-rera', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">4. RERA 70/30 Escrow</button>
+      <button onclick="tab('view-zba', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">5. Liquidity Sweeps (ZBA)</button>
+      <button onclick="tab('view-lc', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">6. Trade Finance (MT700 LC)</button>
+      
+      <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1 pt-3">Regulatory Specifications</div>
+      <button onclick="tab('view-prd', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">7. Detailed PRD & Rules</button>
+      <button onclick="tab('view-glossary', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">8. Banking Glossary</button>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main class="col-span-10 relative overflow-hidden bg-slate-100 h-full">
+
+      <!-- 1. DRAGGABLE N8N CANVAS -->
+      <div id="view-canvas" class="tab-panel h-full flex flex-col relative">
+        <div class="bg-white border-b border-slate-200 px-6 py-2 flex justify-between items-center z-10 shadow-sm h-10">
+          <div class="flex items-center space-x-3">
+            <span class="text-[11px] font-bold text-slate-500 uppercase">Architecture Pipeline:</span>
+            <select id="canvas-product-select" onchange="switchArchitectureFlow(this.value)" class="bg-slate-50 border border-slate-300 font-mono text-xs font-semibold px-2 py-0.5 rounded outline-none text-slate-800">
+              <option value="domestic">Domestic Multi-Rail Outward (RTGS/NEFT/UPI)</option>
+              <option value="cbpr">Cross-Border SWIFT CBPR+ (MT103 / pacs.008)</option>
+              <option value="van">Receivables & Virtual Account (VAN) Matching</option>
+              <option value="rera">RERA Section 4(2)(l)(D) Escrow 70/30 Split</option>
+              <option value="zba">Liquidity Concentration (ZBA Master Sweep)</option>
+              <option value="lc">Trade Finance Letter of Credit (MT700 Drawdown)</option>
+            </select>
+          </div>
+          <span class="text-[11px] text-slate-400 font-mono">Node canvas with dynamic vector handles. Drag to reposition.</span>
+        </div>
+
+        <div id="canvas-board" class="flex-1 relative overflow-hidden canvas-dot-grid">
+          <svg id="canvas-svg" class="absolute inset-0 w-full h-full pointer-events-none z-0"></svg>
+          <div id="canvas-nodes-container" class="absolute inset-0 w-full h-full z-10 pointer-events-none"></div>
+        </div>
+
+        <!-- Slide-Over Inspector Drawer -->
+        <div id="node-drawer" class="hidden absolute top-0 right-0 w-[440px] h-full bg-white border-l border-slate-200 shadow-2xl z-40 flex flex-col">
+          <div class="p-3.5 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+            <div>
+              <span class="font-mono text-[9.5px] uppercase font-bold text-slate-500" id="dr-layer">STEP DIAGNOSTICS</span>
+              <h3 class="font-bold text-xs text-slate-800" id="dr-title">Node Title</h3>
+            </div>
+            <button onclick="closeDrawer()" class="text-slate-400 hover:text-slate-600 text-lg font-bold px-2 py-0.5 rounded">&times;</button>
+          </div>
+          <div class="p-4 flex-1 overflow-y-auto space-y-3.5">
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Source & Destination Flow</label>
+              <div class="bg-slate-100 border border-slate-200 p-2 rounded font-mono text-[11px] text-slate-800 font-semibold" id="dr-path"></div>
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Operational Role & Function</label>
+              <p class="text-xs text-slate-600 leading-relaxed" id="dr-desc"></p>
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Regulatory Invariant</label>
+              <div class="bg-slate-100 border border-slate-200 p-2 rounded font-mono text-[11px] text-slate-700 font-semibold" id="dr-rule"></div>
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">State Packet / Wire Schema</label>
+              <pre class="bg-slate-900 text-slate-100 p-3 rounded font-mono text-[10.5px] max-h-56 overflow-auto" id="dr-payload"></pre>
             </div>
           </div>
         </div>
@@ -207,7 +728,7 @@
                   <option value="IMPS">IMPS (24x7 Real-Time Switch)</option>
                 </select>
               </div>
-              <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 rounded text-xs transition">Dispatch Idempotent Transfer</button>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Dispatch Idempotent Transfer</button>
               <button type="button" onclick="submitEOD()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-1.5 rounded text-xs transition">Trigger EOD Nostro Settlement</button>
             </form>
           </div>
@@ -231,11 +752,11 @@
             <div class="grid grid-cols-2 gap-4">
               <div class="bg-white border border-slate-200 rounded shadow-sm p-3">
                 <div class="text-[10px] font-bold text-slate-500 uppercase mb-2">ISO 20022 PACS.008 XML</div>
-                <pre id="pacs-box" class="bg-slate-900 text-sky-400 p-3 rounded font-mono text-[10.5px] max-h-48 overflow-auto">&lt;!-- Dispatched pacs.008 schema payload will stream here --&gt;</pre>
+                <pre id="pacs-box" class="bg-slate-900 text-slate-100 p-3 rounded font-mono text-[10.5px] max-h-48 overflow-auto">&lt;!-- Dispatched pacs.008 schema payload will stream here --&gt;</pre>
               </div>
               <div class="bg-white border border-slate-200 rounded shadow-sm p-3">
                 <div class="text-[10px] font-bold text-slate-500 uppercase mb-2">ERP Webhook Dispatch</div>
-                <pre id="webhook-box" class="bg-slate-900 text-emerald-400 p-3 rounded font-mono text-[10.5px] max-h-48 overflow-auto">/* Signed HMAC-SHA256 ERP webhook payload */</pre>
+                <pre id="webhook-box" class="bg-slate-900 text-slate-100 p-3 rounded font-mono text-[10.5px] max-h-48 overflow-auto">/* Signed HMAC-SHA256 ERP webhook payload */</pre>
               </div>
             </div>
           </div>
@@ -272,12 +793,12 @@
                 <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Amount (USD)</label>
                 <input type="number" id="cb-amt" value="250000" min="100" step="0.01" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold">
               </div>
-              <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 rounded text-xs transition">Dispatch SWIFT MT103</button>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Dispatch SWIFT MT103</button>
             </form>
           </div>
           <div class="col-span-8 bg-white border border-slate-200 rounded shadow-sm p-4">
             <h3 class="font-bold text-slate-800 text-xs uppercase tracking-wide mb-2">Generated SWIFT FIN MT103 Wire Block</h3>
-            <pre id="swift-box" class="bg-slate-900 text-sky-400 p-4 rounded font-mono text-xs max-h-96 overflow-auto">/* Dispatched MT103 block will appear here */</pre>
+            <pre id="swift-box" class="bg-slate-900 text-slate-100 p-4 rounded font-mono text-xs max-h-96 overflow-auto">/* Dispatched MT103 block will appear here */</pre>
           </div>
         </div>
       </div>
@@ -308,12 +829,12 @@
                 <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Collection Amount (INR)</label>
                 <input type="number" id="van-amt" value="1850000" min="100" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold">
               </div>
-              <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 rounded text-xs transition">Ingest & Auto-Reconcile VAN</button>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Ingest & Auto-Reconcile VAN</button>
             </form>
           </div>
           <div class="col-span-8 bg-white border border-slate-200 rounded shadow-sm p-4">
             <h3 class="font-bold text-slate-800 text-xs uppercase tracking-wide mb-2">VAN Auto-Reconciliation Event Log</h3>
-            <pre id="van-box" class="bg-slate-900 text-emerald-400 p-4 rounded font-mono text-xs max-h-96 overflow-auto">/* VAN Remittance output will stream here */</pre>
+            <pre id="van-box" class="bg-slate-900 text-slate-100 p-4 rounded font-mono text-xs max-h-96 overflow-auto">/* VAN Remittance output will stream here */</pre>
           </div>
         </div>
       </div>
@@ -336,21 +857,21 @@
                 <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Consideration Amount (INR)</label>
                 <input type="number" id="rera-amt" value="5000000" min="1000" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold">
               </div>
-              <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 rounded text-xs transition">Execute Escrow Split</button>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Execute Escrow Split</button>
             </form>
           </div>
           <div class="col-span-8 space-y-4">
             <div class="grid grid-cols-2 gap-4">
-              <div class="bg-white border-l-4 border-sky-600 border border-slate-200 p-4 rounded shadow-sm">
+              <div class="bg-white border-l-4 border-slate-900 border border-slate-200 p-4 rounded shadow-sm">
                 <div class="text-[10px] uppercase font-bold text-slate-400">70% Dedicated Project Escrow</div>
-                <div class="font-mono text-lg font-bold text-sky-700 mt-1" id="box-rera-70">INR 7,00,00,000.00</div>
+                <div class="font-mono text-lg font-bold text-slate-900 mt-1" id="box-rera-70">INR 7,00,00,000.00</div>
               </div>
               <div class="bg-white border-l-4 border-emerald-600 border border-slate-200 p-4 rounded shadow-sm">
                 <div class="text-[10px] uppercase font-bold text-slate-400">30% Operational Current Account</div>
                 <div class="font-mono text-lg font-bold text-emerald-700 mt-1" id="box-rera-30">INR 3,00,00,000.00</div>
               </div>
             </div>
-            <pre id="rera-box" class="bg-slate-900 text-sky-400 p-4 rounded font-mono text-xs max-h-60 overflow-auto">/* RERA Execution output will appear here */</pre>
+            <pre id="rera-box" class="bg-slate-900 text-slate-100 p-4 rounded font-mono text-xs max-h-60 overflow-auto">/* RERA Execution output will appear here */</pre>
           </div>
         </div>
       </div>
@@ -369,7 +890,7 @@
                 <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Sweep Amount (INR)</label>
                 <input type="number" id="zba-amt" value="2500000" min="1000" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold">
               </div>
-              <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 rounded text-xs transition">Execute Cash Sweep</button>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Execute Cash Sweep</button>
             </form>
           </div>
           <div class="col-span-8 space-y-4">
@@ -377,7 +898,7 @@
               <div class="text-[10px] uppercase font-bold text-slate-400">Concentrated Master Pool</div>
               <div class="font-mono text-xl font-bold text-emerald-700 mt-1" id="box-pool">INR 8,50,00,000.00</div>
             </div>
-            <pre id="sweep-box" class="bg-slate-900 text-sky-400 p-4 rounded font-mono text-xs max-h-60 overflow-auto">/* Sweep execution journal output */</pre>
+            <pre id="sweep-box" class="bg-slate-900 text-slate-100 p-4 rounded font-mono text-xs max-h-60 overflow-auto">/* Sweep execution journal output */</pre>
           </div>
         </div>
       </div>
@@ -408,12 +929,12 @@
                 <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Drawdown Amount (INR)</label>
                 <input type="number" id="lc-amt" value="5000000" min="1000" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold">
               </div>
-              <button type="submit" class="w-full bg-purple-700 hover:bg-purple-800 text-white font-semibold py-2 rounded text-xs transition">Honor Documents & Drawdown</button>
+              <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-2 rounded text-xs transition">Honor Documents & Drawdown</button>
             </form>
           </div>
           <div class="col-span-8 bg-white border border-slate-200 rounded shadow-sm p-4">
             <h3 class="font-bold text-slate-800 text-xs uppercase tracking-wide mb-2">Generated SWIFT FIN MT700 Record</h3>
-            <pre id="lc-box" class="bg-slate-900 text-purple-300 p-4 rounded font-mono text-xs max-h-96 overflow-auto">/* Dispatched MT700 will appear here */</pre>
+            <pre id="lc-box" class="bg-slate-900 text-slate-100 p-4 rounded font-mono text-xs max-h-96 overflow-auto">/* Dispatched MT700 will appear here */</pre>
           </div>
         </div>
       </div>
@@ -422,7 +943,7 @@
       <div id="view-prd" class="tab-panel hidden p-8 space-y-6 overflow-y-auto h-full">
         <div class="bg-white border border-slate-200 rounded shadow-sm p-6 space-y-4">
           <div class="border-b border-slate-100 pb-3">
-            <span class="text-[10px] font-mono uppercase font-bold text-sky-600">SYSTEM ARCHITECTURE SPECIFICATION</span>
+            <span class="text-[10px] font-mono uppercase font-bold text-slate-500">SYSTEM ARCHITECTURE SPECIFICATION</span>
             <h1 class="text-base font-bold text-slate-900 mt-1">TBG-CORE Product Requirement Document (PRD v4.2)</h1>
           </div>
           <div>
@@ -455,27 +976,27 @@
       <div id="view-glossary" class="tab-panel hidden p-8 overflow-y-auto h-full">
         <div class="grid grid-cols-3 gap-4">
           <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
-            <div class="font-mono text-xs font-bold text-sky-700 uppercase mb-1">pacs.008 (ISO 20022)</div>
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">pacs.008 (ISO 20022)</div>
             <p class="text-slate-600 text-xs leading-relaxed">Financial Customer Credit Transfer. Interbank standard for wholesale transfers across RTGS, NEFT, and SWIFT CBPR+.</p>
           </div>
           <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
-            <div class="font-mono text-xs font-bold text-sky-700 uppercase mb-1">CMS Suspense Account</div>
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">CMS Suspense Account</div>
             <p class="text-slate-600 text-xs leading-relaxed">Internal clearing transit ledger representing the bank's liability to clearing houses before daily multilateral net settlement.</p>
           </div>
           <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
-            <div class="font-mono text-xs font-bold text-sky-700 uppercase mb-1">SWIFT FIN MT103</div>
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">SWIFT FIN MT103</div>
             <p class="text-slate-600 text-xs leading-relaxed">Single customer credit transfer format containing Tag 20, Tag 32A, Tag 50K, and mandatory UETR tracking references.</p>
           </div>
           <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
-            <div class="font-mono text-xs font-bold text-sky-700 uppercase mb-1">Zero-Balance Account (ZBA)</div>
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">Zero-Balance Account (ZBA)</div>
             <p class="text-slate-600 text-xs leading-relaxed">Subsidiary account swept to a central master pool at cutoff to eliminate idle cash and optimize overnight repo yields.</p>
           </div>
           <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
-            <div class="font-mono text-xs font-bold text-sky-700 uppercase mb-1">Virtual Account (VAN)</div>
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">Virtual Account (VAN)</div>
             <p class="text-slate-600 text-xs leading-relaxed">Shadow routing identifier mapped directly to a client pool account for automated reconciliation without opening thousands of distinct accounts.</p>
           </div>
           <div class="bg-white border border-slate-200 rounded p-4 shadow-sm">
-            <div class="font-mono text-xs font-bold text-sky-700 uppercase mb-1">Documentary Credit (MT700)</div>
+            <div class="font-mono text-xs font-bold text-slate-900 uppercase mb-1">Documentary Credit (MT700)</div>
             <p class="text-slate-600 text-xs leading-relaxed">Irrevocable undertaking issued by an issuing bank guaranteeing payment upon presentation of compliant documents under UCP 600 rules.</p>
           </div>
         </div>
@@ -487,19 +1008,19 @@
   <script>
     // Distinct vector SVG icons for each node type
     const vectorIcons = {
-      erp: '<svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>',
-      ingress: '<svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>',
-      ledger: '<svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/></svg>',
-      router: '<svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>',
-      clearing: '<svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>'
+      erp: '<svg class="w-4 h-4 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>',
+      ingress: '<svg class="w-4 h-4 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>',
+      ledger: '<svg class="w-4 h-4 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/></svg>',
+      router: '<svg class="w-4 h-4 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>',
+      clearing: '<svg class="w-4 h-4 text-purple-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>'
     };
 
     const nodeColorStyles = {
-      erp: { border: "border-indigo-300", bgBadge: "bg-indigo-50 text-indigo-700", ring: "ring-indigo-100" },
-      ingress: { border: "border-sky-300", bgBadge: "bg-sky-50 text-sky-700", ring: "ring-sky-100" },
-      ledger: { border: "border-emerald-300", bgBadge: "bg-emerald-50 text-emerald-700", ring: "ring-emerald-100" },
-      router: { border: "border-amber-300", bgBadge: "bg-amber-50 text-amber-800", ring: "ring-amber-100" },
-      clearing: { border: "border-purple-300", bgBadge: "bg-purple-50 text-purple-700", ring: "ring-purple-100" }
+      erp: { border: "border-slate-300", bgBadge: "bg-slate-100 text-slate-700" },
+      ingress: { border: "border-slate-300", bgBadge: "bg-slate-100 text-slate-700" },
+      ledger: { border: "border-emerald-300", bgBadge: "bg-emerald-50 text-emerald-800" },
+      router: { border: "border-amber-300", bgBadge: "bg-amber-50 text-amber-800" },
+      clearing: { border: "border-purple-300", bgBadge: "bg-purple-50 text-purple-800" }
     };
 
     const productFlows = {
@@ -548,7 +1069,7 @@
         nodes: [
           { id: "erp", icon: "erp", x: 40, y: 160, step: "1. Subsidiary Operations", sub: "Decentralized Plant Acct", tag: "ZBA CURRENT", from: "Subsidiary Current Account", to: "Treasury Ingress", desc: "Subsidiary plant collects decentralized customer receipts.", rule: "Intraday transactional decentralized liquidity", payload: '{\n  "subsidiary_account": "SUBSIDIARY_PUNE_PLANT_4021",\n  "day_end_balance": 2500000.00\n}' },
           { id: "ingress", icon: "ingress", x: 260, y: 160, step: "2. EOD Concentration Trigger", sub: "Cutoff Sweep Scheduler", tag: "TREASURY POOL", from: "Treasury Engine", to: "ZBA Sweeper Core", desc: "EOD cut-off executes automated cash concentration sweeps.", rule: "Zero idle balance mandate", payload: '{\n  "cutoff_time": "18:00:00 IST",\n  "target_subsidiary_balance": "INR 0.00"\n}' },
-          { id: "ledger", icon: "ledger", x: 480, y: 160, step: "3. Intercompany Journal", sub: "DR Subsidiary // CR Master Pool", tag: "SWEEP LEDGER", from: "Subsidiary Acct", to: "Master Treasury Concentration Pool", desc: "Debits subsidiary to zero; credits central master concentration pool.", rule: "Balanced internal treasury ledger posting", payload: '[\n  { "acct": "SUBSIDIARY_PUNE_PLANT_4021", "leg": "DR", "amount": 250000.00 },\n  { "acct": "MASTER_LIQUIDITY_POOL_01", "leg": "CR", "amount": 2500000.00 }\n]' },
+          { id: "ledger", icon: "ledger", x: 480, y: 160, step: "3. Intercompany Journal", sub: "DR Subsidiary // CR Master Pool", tag: "SWEEP LEDGER", from: "Subsidiary Acct", to: "Master Treasury Concentration Pool", desc: "Debits subsidiary to zero; credits central master concentration pool.", rule: "Balanced internal treasury ledger posting", payload: '[\n  { "acct": "SUBSIDIARY_PUNE_PLANT_4021", "leg": "DR", "amount": 2500000.00 },\n  { "acct": "MASTER_LIQUIDITY_POOL_01", "leg": "CR", "amount": 2500000.00 }\n]' },
           { id: "router", icon: "router", x: 700, y: 160, step: "4. Treasury Optimization", sub: "Overnight Reverse Repo", tag: "YIELD ENGINE", from: "Master Pooling Account", to: "Money Market Desk", desc: "Aggregated corporate balance deployed in overnight repo.", rule: "Yield maximization on idle balances", payload: '{\n  "concentrated_pool_total": "INR 8,50,00,000.00",\n  "overnight_yield": "6.50% p.a. Repo"\n}' },
           { id: "clearing", icon: "clearing", x: 920, y: 160, step: "5. Morning Reverse Sweep", sub: "Target Balance Refill", tag: "NEXT DAY OPEN", from: "Master Pool", to: "Subsidiary ZBA", desc: "Next morning, target working capital limits replenished.", rule: "Automated two-way target balancing", payload: '{\n  "morning_refill_scheduled": true\n}' }
         ]
@@ -583,7 +1104,7 @@
         const div = document.createElement("div");
         div.id = "cnode-" + node.id;
         const color = nodeColorStyles[node.icon] || nodeColorStyles.ingress;
-        div.className = "draggable-node w-48 bg-white border-2 " + color.border + " rounded-lg p-3 cursor-grab shadow-sm pointer-events-auto " + color.ring;
+        div.className = "draggable-node w-48 bg-white border " + color.border + " rounded shadow-sm p-3 cursor-grab pointer-events-auto";
         div.style.left = node.x + "px";
         div.style.top = node.y + "px";
 
@@ -602,14 +1123,14 @@
         const iconSvg = vectorIcons[node.icon] || vectorIcons.ingress;
 
         div.innerHTML = '<div class="flex justify-between items-center mb-1">' +
-          '<div class="flex items-center space-x-1.5">' + iconSvg + '<span class="text-[9px] font-mono font-bold uppercase text-slate-500">Step ' + (i+1) + '</span></div>' +
-          '<span id="pdot-' + node.id + '" class="w-2 h-2 rounded-full bg-slate-300"></span>' +
+          '<div class="flex items-center space-x-1.5">' + iconSvg + '<span class="text-[9.5px] font-mono font-bold uppercase text-slate-500">Step ' + (i+1) + '</span></div>' +
+          '<span id="pdot-' + node.id + '" class="w-1.5 h-1.5 rounded-full bg-slate-300"></span>' +
           '</div>' +
-          '<div class="font-bold text-xs text-slate-800">' + node.step + '</div>' +
-          '<div class="font-mono text-[10px] text-slate-500 mt-0.5">' + node.sub + '</div>' +
-          '<div class="mt-2 ' + color.bgBadge + ' border border-slate-100 rounded px-1.5 py-0.5 font-mono text-[9px] font-semibold">' + node.tag + '</div>' +
-          (i > 0 ? '<span class="absolute -left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>' : '') +
-          (i < flow.nodes.length - 1 ? '<span class="absolute -right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>' : '');
+          '<div class="font-bold text-xs text-slate-900">' + node.step + '</div>' +
+          '<div class="font-mono text-[9.5px] text-slate-500 mt-0.5">' + node.sub + '</div>' +
+          '<div class="mt-2 ' + color.bgBadge + ' border border-slate-200/50 rounded px-1.5 py-0.5 font-mono text-[9px] font-semibold">' + node.tag + '</div>' +
+          (i > 0 ? '<span class="absolute -left-1.5 top-1/2 -translate-y-1/2 w-3 h-3 bg-white border border-slate-400 rounded-full"></span>' : '') +
+          (i < flow.nodes.length - 1 ? '<span class="absolute -right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 bg-white border border-slate-400 rounded-full"></span>' : '');
         
         container.appendChild(div);
       });
@@ -619,8 +1140,8 @@
 
     window.onmousemove = function(e) {
       if (!activeDragNode) return;
-      const x = Math.max(10, Math.min(e.clientX - dragOffset.x, window.innerWidth - 300));
-      const y = Math.max(10, Math.min(e.clientY - dragOffset.y, window.innerHeight - 200));
+      const x = Math.max(10, Math.min(e.clientX - dragOffset.x, window.innerWidth - 260));
+      const y = Math.max(10, Math.min(e.clientY - dragOffset.y, window.innerHeight - 150));
       activeDragNode.elem.style.left = x + "px";
       activeDragNode.elem.style.top = y + "px";
       activeDragNode.nodeObj.x = x;
@@ -644,16 +1165,16 @@
         const n1 = flow.nodes[i];
         const n2 = flow.nodes[i+1];
 
-        const x1 = n1.x + 192; // 192px = w-48 width
-        const y1 = n1.y + 45;  // 45px = center height
+        const x1 = n1.x + 192; // 192px = w-48
+        const y1 = n1.y + 44;
         const x2 = n2.x;
-        const y2 = n2.y + 45;
+        const y2 = n2.y + 44;
 
-        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        const path = document.createElementNS("[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)", "path");
         path.id = "cable-" + i;
         path.setAttribute("d", "M " + x1 + " " + y1 + " C " + (x1+50) + " " + y1 + ", " + (x2-50) + " " + y2 + ", " + x2 + " " + y2);
-        path.setAttribute("stroke", "#cbd5e1");
-        path.setAttribute("stroke-width", "2.5");
+        path.setAttribute("stroke", "#94a3b8");
+        path.setAttribute("stroke-width", "2");
         path.setAttribute("fill", "none");
         svg.appendChild(path);
       }
@@ -669,16 +1190,16 @@
       document.getElementById("node-drawer").classList.remove("hidden");
 
       document.querySelectorAll(".draggable-node").forEach(function(n) {
-        n.classList.remove("ring-4", "ring-sky-200");
+        n.classList.remove("ring-2", "ring-slate-900");
       });
       const el = document.getElementById("cnode-" + node.id);
-      if (el) el.classList.add("ring-4", "ring-sky-200");
+      if (el) el.classList.add("ring-2", "ring-slate-900");
     }
 
     function closeDrawer() {
       document.getElementById("node-drawer").classList.add("hidden");
       document.querySelectorAll(".draggable-node").forEach(function(n) {
-        n.classList.remove("ring-4", "ring-sky-200");
+        n.classList.remove("ring-2", "ring-slate-900");
       });
     }
 
@@ -690,30 +1211,30 @@
       const flow = productFlows[currentFlowKey];
 
       flow.nodes.forEach(function(n, i) {
-        document.getElementById("pdot-" + n.id).className = "w-2 h-2 rounded-full bg-slate-300";
-        document.getElementById("cnode-" + n.id).classList.remove("ring-4", "ring-sky-200");
+        document.getElementById("pdot-" + n.id).className = "w-1.5 h-1.5 rounded-full bg-slate-300";
+        document.getElementById("cnode-" + n.id).classList.remove("ring-2", "ring-slate-900");
         const cable = document.getElementById("cable-" + i);
         if (cable) {
-          cable.setAttribute("stroke", "#cbd5e1");
+          cable.setAttribute("stroke", "#94a3b8");
           cable.classList.remove("flow-cable");
         }
       });
 
       for (let i = 0; i < flow.nodes.length; i++) {
         const node = flow.nodes[i];
-        document.getElementById("pdot-" + node.id).className = "w-2 h-2 rounded-full bg-sky-500 animate-ping";
+        document.getElementById("pdot-" + node.id).className = "w-1.5 h-1.5 rounded-full bg-slate-900 animate-ping";
         openInspector(node);
 
         if (i < flow.nodes.length - 1) {
           const cable = document.getElementById("cable-" + i);
           if (cable) {
-            cable.setAttribute("stroke", "#0284c7");
+            cable.setAttribute("stroke", "#0f172a");
             cable.classList.add("flow-cable");
           }
         }
 
-        await new Promise(function(r) { setTimeout(r, 1100); });
-        document.getElementById("pdot-" + node.id).className = "w-2 h-2 rounded-full bg-emerald-500";
+        await new Promise(function(r) { setTimeout(r, 900); });
+        document.getElementById("pdot-" + node.id).className = "w-1.5 h-1.5 rounded-full bg-emerald-600";
       }
 
       btn.disabled = false;
@@ -723,10 +1244,10 @@
     function tab(id, btn) {
       document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.add('hidden'); });
       document.querySelectorAll('.tab-btn').forEach(function(b) {
-        b.classList.remove('bg-sky-50', 'text-sky-700', 'font-semibold', 'border', 'border-sky-200');
+        b.classList.remove('bg-slate-100', 'text-slate-900', 'font-semibold', 'border', 'border-slate-300');
       });
       document.getElementById(id).classList.remove('hidden');
-      btn.classList.add('bg-sky-50', 'text-sky-700', 'font-semibold', 'border', 'border-sky-200');
+      btn.classList.add('bg-slate-100', 'text-slate-900', 'font-semibold', 'border', 'border-slate-300');
       if (id === 'view-canvas') setTimeout(drawCables, 50);
     }
 
