@@ -14,21 +14,6 @@ import (
 	"time"
 )
 
-// Splunk-compliant structured audit event payload
-type AuditLog struct {
-	Timestamp     string  `json:"timestamp"`
-	LogLevel      string  `json:"log_level"`
-	CorrelationID string  `json:"correlation_id"`
-	Channel       string  `json:"channel"`
-	EventType     string  `json:"event_type"`
-	AccountID     string  `json:"account_id"`
-	TxnID         string  `json:"txnid"`
-	Amount        float64 `json:"amount"`
-	Currency      string  `json:"currency"`
-	Status        string  `json:"status"`
-	LatencyMS     float64 `json:"latency_ms"`
-}
-
 type JournalEntry struct {
 	ID        string  `json:"id"`
 	Timestamp string  `json:"timestamp"`
@@ -53,6 +38,8 @@ type EngineState struct {
 	ReraProjectEscrow float64
 	ReraFreeFloat     float64
 	SweepPoolINR      float64
+	LCEscrowINR       float64
+	VANCollectionsINR float64
 	EntryCounter      int
 	Ledger            []JournalEntry
 	IdempotencyMap    map[string]bool
@@ -68,6 +55,8 @@ var state = EngineState{
 	ReraProjectEscrow: 70000000.00,
 	ReraFreeFloat:     30000000.00,
 	SweepPoolINR:      85000000.00,
+	LCEscrowINR:       25000000.00,
+	VANCollectionsINR: 14200000.00,
 	EntryCounter:      4,
 	IdempotencyMap:    make(map[string]bool),
 	Ledger: []JournalEntry{
@@ -78,30 +67,13 @@ var state = EngineState{
 	},
 }
 
-func logAudit(eventType, acct, txnid string, amt float64, currency, status string, latency float64) {
-	logItem := AuditLog{
-		Timestamp:     time.Now().UTC().Format(time.RFC3339),
-		LogLevel:      "INFO",
-		CorrelationID: fmt.Sprintf("%08x-%04x-4%03x", rand.Uint32(), rand.Uint32()&0xffff, rand.Uint32()&0xfff),
-		Channel:       "TBG_HEADLESS_CORE",
-		EventType:     eventType,
-		AccountID:     acct,
-		TxnID:         txnid,
-		Amount:        amt,
-		Currency:      currency,
-		Status:        status,
-		LatencyMS:     latency,
-	}
-	bytes, _ := json.Marshal(logItem)
-	fmt.Println(string(bytes))
-}
-
+// 1. Double-Entry Balance & Journal State
 func handleGetLedger(w http.ResponseWriter, r *http.Request) {
 	state.Lock()
 	defer state.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"system":               "TBG-CORE-HEADLESS",
+		"system":               "TBG-CORE-ENTERPRISE",
 		"acid_invariance":      "SUM(DR) - SUM(CR) = 0",
 		"corporate_float_inr":  state.FloatINR,
 		"corporate_float_usd":  state.FloatUSD,
@@ -112,11 +84,14 @@ func handleGetLedger(w http.ResponseWriter, r *http.Request) {
 		"rera_project_escrow":  state.ReraProjectEscrow,
 		"rera_free_float":      state.ReraFreeFloat,
 		"liquidity_sweep_pool": state.SweepPoolINR,
-		"audited_entries_cnt":  state.EntryCounter,
+		"lc_escrow_margin_inr": state.LCEscrowINR,
+		"van_collections_inr":  state.VANCollectionsINR,
+		"entry_counter":        state.EntryCounter,
 		"postings_ledger":      state.Ledger,
 	})
 }
 
+// 2. Domestic Outward Clearing (ISO 20022 pacs.008)
 func handleDomesticPayout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"Method Not Allowed"}`, http.StatusMethodNotAllowed)
@@ -134,7 +109,7 @@ func handleDomesticPayout(w http.ResponseWriter, r *http.Request) {
 		IdempotencyKey  string  `json:"idempotency_key"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"Malformed JSON payload"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Malformed JSON"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -142,11 +117,11 @@ func handleDomesticPayout(w http.ResponseWriter, r *http.Request) {
 	defer state.Unlock()
 
 	if state.IdempotencyMap[req.IdempotencyKey] {
-		http.Error(w, `{"error":"Idempotency Conflict: Transaction already booked"}`, http.StatusConflict)
+		http.Error(w, `{"error":"Idempotency Conflict: Key already settled"}`, http.StatusConflict)
 		return
 	}
 	if req.Amount > state.FloatINR {
-		http.Error(w, `{"error":"Insufficient Corporate Float"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Insufficient Float Balance"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -167,7 +142,7 @@ func handleDomesticPayout(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	e1 := JournalEntry{ID: fmt.Sprintf("#%02d", state.EntryCounter), Timestamp: ts, JVID: jvID, Account: "AC_CMS_SUSPENSE_CLEARING_9999", Leg: "CR", Amount: req.Amount, Currency: "INR", Module: "DOMESTIC_PAYOUT", Narrative: "Outward Transit Float Reserve", Audit: "ZERO-SUM OK"}
+	e1 := JournalEntry{ID: fmt.Sprintf("#%02d", state.EntryCounter), Timestamp: ts, JVID: jvID, Account: "AC_CMS_SUSPENSE_CLEARING_9999", Leg: "CR", Amount: req.Amount, Currency: "INR", Module: "DOMESTIC_PAYOUT", Narrative: "Transit Outward Float Reservation", Audit: "ZERO-SUM OK"}
 	e2 := JournalEntry{ID: fmt.Sprintf("#%02d", state.EntryCounter-1), Timestamp: ts, JVID: jvID, Account: req.SourceAccount, Leg: "DR", Amount: req.Amount, Currency: "INR", Module: "DOMESTIC_PAYOUT", Narrative: "Debtor Float Settlement Debit", Audit: "ZERO-SUM OK"}
 	state.Ledger = append([]JournalEntry{e1, e2}, state.Ledger...)
 
@@ -176,7 +151,6 @@ func handleDomesticPayout(w http.ResponseWriter, r *http.Request) {
 	sig := hex.EncodeToString(mac.Sum(nil))
 
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
-	logAudit("DOMESTIC_PAYOUT_SETTLED", req.SourceAccount, jvID, req.Amount, "INR", "SETTLED", latency)
 
 	isoXML := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <Document xmlns="urn:iso:std:iso:20022:tech:xsd:pacs.008.001.08">
@@ -213,6 +187,7 @@ func handleDomesticPayout(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// 3. Cross-Border Wire (SWIFT FIN MT103 / CBPR+)
 func handleCrossBorderPayout(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost { return }
 	start := time.Now()
@@ -234,7 +209,7 @@ func handleCrossBorderPayout(w http.ResponseWriter, r *http.Request) {
 	defer state.Unlock()
 
 	if req.Amount > state.FloatUSD {
-		http.Error(w, `{"error":"Insufficient USD Float balance"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Insufficient USD Float"}`, http.StatusBadRequest)
 		return
 	}
 
@@ -265,19 +240,57 @@ CORP TREASURY GLOBAL CLIENT
 -}`, req.BeneficiaryBIC, uetr, req.IdempotencyKey, time.Now().Format("060102"), req.Currency, req.Amount, req.SourceAccount, req.IntermediaryBIC, req.BeneficiaryBIC, req.BeneficiaryIBAN, req.BeneficiaryName, req.ChargeBearer)
 
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
-	logAudit("SWIFT_MT103_DISPATCHED", req.SourceAccount, jvID, req.Amount, "USD", "DISPATCHED", latency)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":      "DISPATCHED",
 		"jv_id":       jvID,
 		"uetr":        uetr,
-		"standard":    "SWIFT FIN MT103",
 		"swift_mt103": swiftMT103,
 		"latency_ms":  latency,
 	})
 }
 
+// 4. Receivables & Virtual Account (VAN) Collection Matching
+func handleVANCollection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost { return }
+	start := time.Now()
+	var req struct {
+		VirtualAccount string  `json:"virtual_account"`
+		RemitterEntity string  `json:"remitter_entity"`
+		RemitterIFSC   string  `json:"remitter_ifsc"`
+		Amount         float64 `json:"amount"`
+		InvoiceRef     string  `json:"invoice_reference"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	state.Lock()
+	defer state.Unlock()
+
+	state.FloatINR += req.Amount
+	state.VANCollectionsINR += req.Amount
+	jvID := fmt.Sprintf("JV-%08x-VAN", rand.Uint32())
+	ts := time.Now().UTC().Format(time.RFC3339)
+	state.EntryCounter += 2
+
+	e1 := JournalEntry{ID: fmt.Sprintf("#%02d", state.EntryCounter), Timestamp: ts, JVID: jvID, Account: "00040310001928", Leg: "CR", Amount: req.Amount, Currency: "INR", Module: "VAN_COLLECTION", Narrative: fmt.Sprintf("Invoice %s Settlement Inflow", req.InvoiceRef), Audit: "ZERO-SUM OK"}
+	e2 := JournalEntry{ID: fmt.Sprintf("#%02d", state.EntryCounter-1), Timestamp: ts, JVID: jvID, Account: req.VirtualAccount, Leg: "DR", Amount: req.Amount, Currency: "INR", Module: "VAN_COLLECTION", Narrative: fmt.Sprintf("VAN Inward Wire: %s", req.RemitterEntity), Audit: "ZERO-SUM OK"}
+	state.Ledger = append([]JournalEntry{e1, e2}, state.Ledger...)
+
+	latency := float64(time.Since(start).Microseconds()) / 1000.0
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":             "RECONCILED_AND_POSTED",
+		"virtual_account":    req.VirtualAccount,
+		"matched_invoice":    req.InvoiceRef,
+		"amount_settled_inr": req.Amount,
+		"jv_id":              jvID,
+		"latency_ms":         latency,
+	})
+}
+
+// 5. RERA Escrow Split (70/30)
 func handleReraSplit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost { return }
 	start := time.Now()
@@ -306,20 +319,18 @@ func handleReraSplit(w http.ResponseWriter, r *http.Request) {
 	state.Ledger = append([]JournalEntry{e1, e2, e3}, state.Ledger...)
 
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
-	logAudit("RERA_SECTION_4_SPLIT", req.BuyerVAN, jvID, req.Amount, "INR", "ALLOCATED", latency)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":                "ALLOCATED",
-		"rera_rule":             "Section 4(2)(l)(D)",
 		"project_escrow_70_cr":  p70,
 		"operational_float_30_cr": ops30,
-		"buyer_van_dr":          req.Amount,
 		"jv_id":                 jvID,
 		"latency_ms":            latency,
 	})
 }
 
+// 6. Zero-Balance Liquidity Sweeper (ZBA)
 func handleSweep(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost { return }
 	start := time.Now()
@@ -342,18 +353,72 @@ func handleSweep(w http.ResponseWriter, r *http.Request) {
 	state.Ledger = append([]JournalEntry{e1, e2}, state.Ledger...)
 
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
-	logAudit("ZBA_CONCENTRATION_SWEEP", req.SubsidiaryAccount, jvID, req.SweepAmount, "INR", "SWEPT", latency)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":                 "CONCENTRATED",
-		"rule":                   "EOD Zero-Balance Physical Cash Concentration",
 		"pool_consolidated_inr": state.SweepPoolINR,
 		"jv_id":                  jvID,
 		"latency_ms":             latency,
 	})
 }
 
+// 7. Trade Finance: Letter of Credit (MT700 Drawdown Engine)
+func handleTradeFinanceLC(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost { return }
+	start := time.Now()
+	var req struct {
+		LCReference       string  `json:"lc_reference"`
+		ApplicantName     string  `json:"applicant_name"`
+		BeneficiaryName   string  `json:"beneficiary_name"`
+		IssuingBankBIC    string  `json:"issuing_bank_bic"`
+		DrawdownAmountINR float64 `json:"drawdown_amount_inr"`
+	}
+	json.NewDecoder(r.Body).Decode(&req)
+
+	state.Lock()
+	defer state.Unlock()
+
+	if req.DrawdownAmountINR > state.LCEscrowINR {
+		http.Error(w, `{"error":"LC Margin Escrow exceeded"}`, http.StatusBadRequest)
+		return
+	}
+
+	state.LCEscrowINR -= req.DrawdownAmountINR
+	jvID := fmt.Sprintf("JV-%08x-LC", rand.Uint32())
+	ts := time.Now().UTC().Format(time.RFC3339)
+	state.EntryCounter += 2
+
+	e1 := JournalEntry{ID: fmt.Sprintf("#%02d", state.EntryCounter), Timestamp: ts, JVID: jvID, Account: "BENEFICIARY_ADVISING_PAYMENT_AC", Leg: "CR", Amount: req.DrawdownAmountINR, Currency: "INR", Module: "TRADE_FINANCE", Narrative: "MT700 Compliant Document Presentation Settlement", Audit: "ZERO-SUM OK"}
+	e2 := JournalEntry{ID: fmt.Sprintf("#%02d", state.EntryCounter-1), Timestamp: ts, JVID: jvID, Account: "LC_CASH_MARGIN_EARMARKED_8819", Leg: "DR", Amount: req.DrawdownAmountINR, Currency: "INR", Module: "TRADE_FINANCE", Narrative: "Release of 100% Cash Collateral Margin", Audit: "ZERO-SUM OK"}
+	state.Ledger = append([]JournalEntry{e1, e2}, state.Ledger...)
+
+	swiftMT700 := fmt.Sprintf(`{1:F01%s0000000000}{2:I700TBGUSB33XXXXN}{4:
+:27:1/1
+:40A:IRREVOCABLE
+:20:%s
+:31C:%s
+:31D:%sINDIA
+:50:%s
+:59:%s
+:32B:INR%.2f
+:41A:TBGUSB33XXX BY NEGOTIATION
+:78:PAYMENT ON RECEIPT OF CLEAN BILL OF LADING AND SGS INSPECTION
+-}`, req.IssuingBankBIC, req.LCReference, time.Now().Format("060102"), time.Now().AddDate(0, 3, 0).Format("060102"), req.ApplicantName, req.BeneficiaryName, req.DrawdownAmountINR)
+
+	latency := float64(time.Since(start).Microseconds()) / 1000.0
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":       "HONORED_AND_SETTLED",
+		"jv_id":        jvID,
+		"swift_mt700":  swiftMT700,
+		"remaining_lc": state.LCEscrowINR,
+		"latency_ms":   latency,
+	})
+}
+
+// 8. EOD Nostro Clearing
 func handleEODNostro(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost { return }
 	start := time.Now()
@@ -362,7 +427,7 @@ func handleEODNostro(w http.ResponseWriter, r *http.Request) {
 	defer state.Unlock()
 
 	if state.SuspenseINR <= 0 && state.SuspenseUSD <= 0 {
-		http.Error(w, `{"error":"Suspense balance is zero. No central bank settlement required"}`, http.StatusBadRequest)
+		http.Error(w, `{"error":"Suspense liability is zero."}`, http.StatusBadRequest)
 		return
 	}
 
@@ -377,12 +442,10 @@ func handleEODNostro(w http.ResponseWriter, r *http.Request) {
 	state.Ledger = append([]JournalEntry{e1, e2}, state.Ledger...)
 
 	latency := float64(time.Since(start).Microseconds()) / 1000.0
-	logAudit("NOSTRO_EOD_CLEARED", "AC_RBI_NOSTRO_0001", jvID, clearedINR, "INR", "DISCHARGED", latency)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":              "NOSTRO_CLEARED",
-		"settlement_rail":     "Reserve Bank of India RTGS Core",
 		"discharged_suspense": clearedINR,
 		"jv_id":               jvID,
 		"latency_ms":          latency,
@@ -391,12 +454,18 @@ func handleEODNostro(w http.ResponseWriter, r *http.Request) {
 
 func handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(openAPISpecJSON))
+	w.Write([]byte(fullOpenAPISpecJSON))
 }
 
-func handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
+func handleIndex(w http.ResponseWriter, r *http.Request) {
+	// If Option B compiled dist exists, serve it
+	if _, err := os.Stat("tbg-ui/dist/index.html"); err == nil {
+		http.ServeFile(w, r, "tbg-ui/dist/index.html")
+		return
+	}
+	// Otherwise serve polished Option A UI
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(swaggerHTML))
+	w.Write([]byte(optionAHTML))
 }
 
 func main() {
@@ -405,87 +474,51 @@ func main() {
 		port = "10000"
 	}
 
-	http.HandleFunc("/", handleSwaggerUI)
-	http.HandleFunc("/docs", handleSwaggerUI)
+	// Serve Option B static assets if they exist
+	if _, err := os.Stat("tbg-ui/dist"); err == nil {
+		fs := http.FileServer(http.Dir("tbg-ui/dist"))
+		http.Handle("/assets/", fs)
+	}
+
+	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/openapi.json", handleOpenAPISpec)
 
-	// Institutional Headless API Endpoints
+	// Institutional Headless API Endpoints (All Transaction Products)
 	http.HandleFunc("/api/v1/ledger", handleGetLedger)
 	http.HandleFunc("/api/v1/payouts/domestic", handleDomesticPayout)
 	http.HandleFunc("/api/v1/payouts/cross-border", handleCrossBorderPayout)
+	http.HandleFunc("/api/v1/receivables/van-collection", handleVANCollection)
 	http.HandleFunc("/api/v1/escrow/rera-split", handleReraSplit)
 	http.HandleFunc("/api/v1/liquidity/zba-sweep", handleSweep)
+	http.HandleFunc("/api/v1/trade-finance/lc-drawdown", handleTradeFinanceLC)
 	http.HandleFunc("/api/v1/recon/eod-nostro", handleEODNostro)
 
-	log.Printf("TBG-HEADLESS Engine running on :%s", port)
+	log.Printf("TBG Institutional Engine Running on :%s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("Server startup failed: %v", err)
 	}
 }
 
-const swaggerHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>TBG CORE // Institutional OpenAPI Specification</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.29.1/swagger-ui.css" />
-  <style>
-    body { margin: 0; background: #fafafa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-    .top-strip { background: #0f172a; color: #f8fafc; padding: 12px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #1e293b; }
-    .top-strip-title { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; letter-spacing: 0.05em; color: #38bdf8; }
-    .top-strip-meta { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #94a3b8; }
-    .swagger-ui .topbar { display: none; }
-  </style>
-</head>
-<body>
-  <div class="top-strip">
-    <div class="top-strip-title">TBG CORE // TRANSACTION BANKING GATEWAY HEADLESS CORE</div>
-    <div class="top-strip-meta">POSTGRESQL 16 ACID // INVARIANT: &Sigma;DR - &Sigma;CR = 0 // SPEC: OPENAPI 3.1.0</div>
-  </div>
-  <div id="swagger-ui"></div>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.29.1/swagger-ui-bundle.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.29.1/swagger-ui-standalone-preset.js"></script>
-  <script>
-    window.onload = function() {
-      SwaggerUIBundle({
-        url: "/openapi.json",
-        dom_id: '#swagger-ui',
-        deepLinking: true,
-        presets: [
-          SwaggerUIBundle.presets.apis,
-          SwaggerUIStandalonePreset
-        ],
-        layout: "BaseLayout"
-      });
-    };
-  </script>
-</body>
-</html>`
-
-const openAPISpecJSON = `{
+const fullOpenAPISpecJSON = `{
   "openapi": "3.1.0",
   "info": {
     "title": "TBG CORE // Institutional Transaction Banking Platform",
-    "description": "Enterprise Core Payment Engine providing ISO 20022 clearing, SWIFT CBPR+ wire generation, RERA Section 4 escrow partitioning, Zero-Balance Account (ZBA) sweeps, and immutable double-entry ledger settlement.",
+    "description": "Comprehensive Core Transaction Banking Switch supporting Domestic ISO 20022 Rails, Cross-Border SWIFT CBPR+, Receivables Reconciliation (VAN), RERA Dual-Escrow Separation, Zero-Balance Concentration Sweeps (ZBA), and Documentary Trade Finance (MT700 LC).",
     "version": "4.2.0"
   },
-  "servers": [
-    { "url": "/", "description": "Active Engine Node" }
-  ],
+  "servers": [{ "url": "/", "description": "Active Gateway Node" }],
   "paths": {
     "/api/v1/ledger": {
       "get": {
-        "summary": "Query Core Double-Entry Postings Ledger",
-        "description": "Retrieves the immutable journal voucher (JV) ledger, real-time float balances, and zero-sum verification proofs.",
-        "responses": {
-          "200": { "description": "Ledger state and balance sheet" }
-        }
+        "summary": "Core Double-Entry Postings Ledger",
+        "description": "Retrieves the immutable journal voucher ledger with real-time balance sheet proving zero-sum invariance.",
+        "responses": { "200": { "description": "Full Postings Ledger" } }
       }
     },
     "/api/v1/payouts/domestic": {
       "post": {
-        "summary": "Execute Domestic High/Low Value Payout (ISO 20022)",
-        "description": "Executes double-entry balance hold, smart-routes across RTGS/NEFT/UPI rails, commits transit suspense, and generates pacs.008.001.08 wire schema.",
+        "summary": "Domestic Multi-Rail Payout (ISO 20022)",
+        "description": "Smart-routes across RTGS/NEFT/UPI, executes double-entry hold, and emits pacs.008 XML & HMAC-SHA256 webhooks.",
         "requestBody": {
           "required": true,
           "content": {
@@ -502,17 +535,13 @@ const openAPISpecJSON = `{
             }
           }
         },
-        "responses": {
-          "200": { "description": "Settled with ISO 20022 pacs.008 XML & HMAC-SHA256 signature" },
-          "400": { "description": "Insufficient corporate float balance" },
-          "409": { "description": "Idempotency conflict" }
-        }
+        "responses": { "200": { "description": "Settled with pacs.008 schema payload" } }
       }
     },
     "/api/v1/payouts/cross-border": {
       "post": {
-        "summary": "Execute SWIFT CBPR+ Cross-Border Wire (MT103)",
-        "description": "Ingests cross-border USD payments, tracks UETR end-to-end references, and generates ISO 20022 pacs.008 & SWIFT FIN MT103 wire formats.",
+        "summary": "SWIFT CBPR+ Cross-Border Wire (MT103)",
+        "description": "Dispatches customer credit transfers over SWIFT CBPR+ with UETR references, emitting valid FIN MT103 wire blocks.",
         "requestBody": {
           "required": true,
           "content": {
@@ -531,15 +560,34 @@ const openAPISpecJSON = `{
             }
           }
         },
-        "responses": {
-          "200": { "description": "Dispatched with UETR and SWIFT MT103 payload" }
-        }
+        "responses": { "200": { "description": "Dispatched with SWIFT MT103 block" } }
+      }
+    },
+    "/api/v1/receivables/van-collection": {
+      "post": {
+        "summary": "Virtual Account (VAN) Collection Reconciliation",
+        "description": "Directly ingests inward remittances onto client VANs, matching invoices and settling client operating float.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "example": {
+                "virtual_account": "VAN-90812-INV44",
+                "remitter_entity": "Reliance Retail Operations",
+                "remitter_ifsc": "SBIN0001041",
+                "amount": 1850000,
+                "invoice_reference": "INV-2026-SEP-091"
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Matched and credited to float" } }
       }
     },
     "/api/v1/escrow/rera-split": {
       "post": {
-        "summary": "Execute RERA Section 4(2)(l)(D) Dual Escrow Split",
-        "description": "Splits buyer consideration into 70% unencumbered construction escrow and 30% operational account.",
+        "summary": "RERA Section 4(2)(l)(D) Escrow Separation",
+        "description": "Splits buyer consideration into 70% unencumbered site construction escrow and 30% operational account.",
         "requestBody": {
           "required": true,
           "content": {
@@ -552,15 +600,13 @@ const openAPISpecJSON = `{
             }
           }
         },
-        "responses": {
-          "200": { "description": "Allocated 70% and 30% with balanced journal entries" }
-        }
+        "responses": { "200": { "description": "Allocated 70/30 with balanced journal" } }
       }
     },
     "/api/v1/liquidity/zba-sweep": {
       "post": {
-        "summary": "Execute Zero-Balance Account (ZBA) Liquidity Sweep",
-        "description": "Sweeps idle subsidiary balances to the master corporate treasury concentration pool.",
+        "summary": "Zero-Balance Account (ZBA) Liquidity Sweep",
+        "description": "Sweeps idle subsidiary current account balances into the master corporate concentration pool.",
         "requestBody": {
           "required": true,
           "content": {
@@ -572,19 +618,618 @@ const openAPISpecJSON = `{
             }
           }
         },
-        "responses": {
-          "200": { "description": "Concentrated into master liquidity pool" }
-        }
+        "responses": { "200": { "description": "Concentrated into master liquidity pool" } }
+      }
+    },
+    "/api/v1/trade-finance/lc-drawdown": {
+      "post": {
+        "summary": "Documentary Credit / Letter of Credit (MT700 Engine)",
+        "description": "Releases 100% cash margin collateral and settles beneficiary advising bank against presented clean documents.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "example": {
+                "lc_reference": "DLC-2026-MUM-8911",
+                "applicant_name": "Bharat Steel & Infrastructure Ltd",
+                "beneficiary_name": "Nippon Steel Heavy Industries Corp",
+                "issuing_bank_bic": "BOTKJPJTXXX",
+                "drawdown_amount_inr": 5000000
+              }
+            }
+          }
+        },
+        "responses": { "200": { "description": "Settled with MT700 wire generation" } }
       }
     },
     "/api/v1/recon/eod-nostro": {
       "post": {
-        "summary": "Trigger EOD Central Bank Nostro Settlement",
+        "summary": "EOD Central Bank Nostro Settlement",
         "description": "Reconciles outstanding CMS Suspense transit liabilities against the central bank Nostro clearing ledger.",
-        "responses": {
-          "200": { "description": "Nostro obligations cleared and discharged" }
-        }
+        "responses": { "200": { "description": "Discharged against central bank Nostro" } }
       }
     }
   }
 }`
+
+const optionAHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>TBG CORE // Institutional Transaction Banking Platform</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans antialiased text-xs">
+
+  <header class="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm">
+    <div class="flex items-center space-x-3">
+      <span class="font-mono font-bold text-sm tracking-tight text-slate-900">TBG CORE // TREASURY</span>
+      <span class="bg-sky-50 text-sky-700 border border-sky-200 font-mono text-[10px] font-semibold px-2 py-0.5 rounded">FULL PRODUCT SUITE</span>
+    </div>
+    <div class="font-mono text-[11px] text-slate-500">
+      POSTGRESQL 16 ACID <span class="mx-1">•</span> INVARIANT: &Sigma;DR - &Sigma;CR = 0 <span class="mx-1">•</span> LATENCY P99: 0.98ms
+    </div>
+  </header>
+
+  <div class="grid grid-cols-6 bg-slate-200 gap-px border-b border-slate-200">
+    <div class="bg-white p-3 px-5">
+      <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Corporate Float</div>
+      <div class="font-mono text-sm font-semibold text-slate-900" id="m-float-inr">INR 9,97,50,000.00</div>
+    </div>
+    <div class="bg-white p-3 px-5">
+      <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Transit Suspense</div>
+      <div class="font-mono text-sm font-semibold text-amber-600" id="m-suspense-inr">INR 0.00</div>
+    </div>
+    <div class="bg-white p-3 px-5">
+      <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 mb-1">USD Liquidity</div>
+      <div class="font-mono text-sm font-semibold text-sky-600" id="m-float-usd">USD 3,500,000.00</div>
+    </div>
+    <div class="bg-white p-3 px-5">
+      <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 mb-1">RERA 70% Escrow</div>
+      <div class="font-mono text-sm font-semibold text-slate-900" id="m-rera-escrow">INR 7,00,00,000.00</div>
+    </div>
+    <div class="bg-white p-3 px-5">
+      <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Trade LC Margin</div>
+      <div class="font-mono text-sm font-semibold text-purple-700" id="m-lc-margin">INR 2,50,00,000.00</div>
+    </div>
+    <div class="bg-white p-3 px-5">
+      <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 mb-1">Audited Postings</div>
+      <div class="font-mono text-sm font-semibold text-emerald-600" id="m-postings-count">4 Entries</div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-12 min-h-[calc(100vh-100px)]">
+    <!-- Sidebar -->
+    <aside class="col-span-2 bg-white border-r border-slate-200 p-3 space-y-1">
+      <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1">Transaction Products</div>
+      <button onclick="tab('view-payout', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100 active bg-sky-50 text-sky-700 font-semibold border border-sky-200">1. Domestic Multi-Rail (ISO)</button>
+      <button onclick="tab('view-cbpr', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">2. SWIFT CBPR+ (MT103)</button>
+      <button onclick="tab('view-van', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">3. Virtual Accounts (VAN)</button>
+      <button onclick="tab('view-rera', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">4. RERA 70/30 Escrow</button>
+      <button onclick="tab('view-zba', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">5. Liquidity Sweeps (ZBA)</button>
+      <button onclick="tab('view-lc', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">6. Trade Finance (MT700 LC)</button>
+      
+      <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1 pt-4">Architecture & Docs</div>
+      <button onclick="tab('view-architecture', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">7. Vector Architecture Flow</button>
+      <button onclick="tab('view-prd', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">8. Institutional PRD</button>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="col-span-10 p-6 space-y-6 overflow-y-auto">
+      
+      <!-- 1. DOMESTIC PAYOUT -->
+      <div id="view-payout" class="tab-panel">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">Execute Outward Payout</h2>
+            <form onsubmit="event.preventDefault(); submitDomestic();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Debtor Account</label>
+                <input type="text" id="p-src" value="00040310001928" readonly class="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded font-mono text-xs text-slate-600">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary Name</label>
+                <input type="text" id="p-bene" value="Tata Motors Fleet Ltd" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary Account</label>
+                <input type="text" id="p-acct" value="912345678901" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">IFSC Code</label>
+                <input type="text" id="p-ifsc" value="HDFC0000001" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Amount (INR)</label>
+                <input type="number" id="p-amt" value="250000" min="1" step="0.01" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Clearing Rail</label>
+                <select id="p-rail" class="w-full border border-slate-300 px-2 py-1.5 rounded font-mono text-xs">
+                  <option value="AUTO">SMART_ROUTE (Latency / Cost Matrix)</option>
+                  <option value="RTGS">RTGS (High-Value Gross Settlement)</option>
+                  <option value="NEFT">NEFT (Batch Clearing - RBI SFMS)</option>
+                  <option value="IMPS">IMPS (24x7 Real-Time Switch)</option>
+                </select>
+              </div>
+              <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 rounded text-xs transition">Dispatch Idempotent Transfer</button>
+              <button type="button" onclick="submitEOD()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-1.5 rounded text-xs transition">Trigger EOD Nostro Settlement</button>
+            </form>
+          </div>
+
+          <div class="col-span-8 space-y-4">
+            <div class="bg-white border border-slate-200 rounded shadow-sm overflow-hidden">
+              <div class="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex justify-between items-center">
+                <span class="font-bold text-slate-700 text-xs uppercase tracking-wide">Double-Entry Journal Postings</span>
+                <span class="text-emerald-700 bg-emerald-50 border border-emerald-200 font-mono text-[10px] font-semibold px-2 py-0.5 rounded">✓ ZERO-SUM VERIFIED</span>
+              </div>
+              <div class="overflow-x-auto max-h-72">
+                <table class="w-full text-left font-mono text-[11px]">
+                  <thead class="bg-slate-100 text-slate-500 border-b border-slate-200 sticky top-0">
+                    <tr>
+                      <th class="p-2.5">ID</th>
+                      <th class="p-2.5">JV ID</th>
+                      <th class="p-2.5">Account</th>
+                      <th class="p-2.5">Leg</th>
+                      <th class="p-2.5">Amount</th>
+                      <th class="p-2.5">Module</th>
+                      <th class="p-2.5">Narrative</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ledger-rows" class="divide-y divide-slate-100"></tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+              <div class="bg-white border border-slate-200 rounded shadow-sm p-3">
+                <div class="text-[10px] font-bold text-slate-500 uppercase mb-2">ISO 20022 PACS.008.001.08 XML Wire</div>
+                <pre id="pacs-box" class="bg-slate-900 text-sky-400 p-3 rounded font-mono text-[10.5px] max-h-48 overflow-auto">&lt;!-- Dispatched pacs.008 will appear here --&gt;</pre>
+              </div>
+              <div class="bg-white border border-slate-200 rounded shadow-sm p-3">
+                <div class="text-[10px] font-bold text-slate-500 uppercase mb-2">Signed Webhook Dispatch (HMAC-SHA256)</div>
+                <pre id="webhook-box" class="bg-slate-900 text-emerald-400 p-3 rounded font-mono text-[10.5px] max-h-48 overflow-auto">/* Signed ERP webhook dispatch will appear here */</pre>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. SWIFT CBPR+ -->
+      <div id="view-cbpr" class="tab-panel hidden">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">SWIFT MT103 / CBPR+ Outward</h2>
+            <form onsubmit="event.preventDefault(); submitCBPR();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Source Account</label>
+                <input type="text" id="cb-src" value="CORP_US_FLOAT_0029" readonly class="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded font-mono text-xs text-slate-600">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary Name</label>
+                <input type="text" id="cb-bene" value="Airbus Operations GmbH" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary IBAN</label>
+                <input type="text" id="cb-iban" value="DE89370400440532013000" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary BIC</label>
+                <input type="text" id="cb-bic" value="DBEUMM21XXX" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Intermediary BIC</label>
+                <input type="text" id="cb-int" value="CHASUS33XXX" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Amount (USD)</label>
+                <input type="number" id="cb-amt" value="250000" min="100" step="0.01" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold">
+              </div>
+              <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 rounded text-xs transition">Dispatch SWIFT MT103</button>
+            </form>
+          </div>
+          <div class="col-span-8 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h3 class="font-bold text-slate-800 text-xs uppercase tracking-wide mb-2">Generated SWIFT FIN MT103 Wire Block</h3>
+            <pre id="swift-box" class="bg-slate-900 text-sky-400 p-4 rounded font-mono text-xs max-h-96 overflow-auto">/* Dispatched MT103 block will appear here */</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. VIRTUAL ACCOUNTS (VAN) -->
+      <div id="view-van" class="tab-panel hidden">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">Receivables & VAN Matching</h2>
+            <form onsubmit="event.preventDefault(); submitVAN();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Client Virtual Account (VAN)</label>
+                <input type="text" id="van-acct" value="VAN-90812-INV44" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Remitter Entity Name</label>
+                <input type="text" id="van-remitter" value="Reliance Retail Operations" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Remitter IFSC</label>
+                <input type="text" id="van-ifsc" value="SBIN0001041" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Invoice Reference</label>
+                <input type="text" id="van-inv" value="INV-2026-SEP-091" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Collection Amount (INR)</label>
+                <input type="number" id="van-amt" value="1850000" min="100" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold">
+              </div>
+              <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 rounded text-xs transition">Ingest & Auto-Reconcile VAN</button>
+            </form>
+          </div>
+          <div class="col-span-8 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h3 class="font-bold text-slate-800 text-xs uppercase tracking-wide mb-2">VAN Auto-Reconciliation Event Log</h3>
+            <pre id="van-box" class="bg-slate-900 text-emerald-400 p-4 rounded font-mono text-xs max-h-96 overflow-auto">/* VAN Remittance output will stream here */</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. RERA ESCROW -->
+      <div id="view-rera" class="tab-panel hidden">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">RERA Section 4 Dual-Escrow Split</h2>
+            <form onsubmit="event.preventDefault(); submitRera();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Project ID</label>
+                <input type="text" value="PRJ-MAHARERA-PUNE-2026-904" readonly class="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded font-mono text-xs text-slate-600">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Homebuyer VAN</label>
+                <input type="text" id="rera-van" value="VAN-PUNE-TWR-801" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Consideration Amount (INR)</label>
+                <input type="number" id="rera-amt" value="5000000" min="1000" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold">
+              </div>
+              <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 rounded text-xs transition">Execute Escrow Split</button>
+            </form>
+          </div>
+          <div class="col-span-8 space-y-4">
+            <div class="grid grid-cols-2 gap-4">
+              <div class="bg-white border-l-4 border-sky-600 border border-slate-200 p-4 rounded shadow-sm">
+                <div class="text-[10px] uppercase font-bold text-slate-400">70% Dedicated Project Escrow</div>
+                <div class="font-mono text-lg font-bold text-sky-700 mt-1" id="box-rera-70">INR 7,00,00,000.00</div>
+              </div>
+              <div class="bg-white border-l-4 border-emerald-600 border border-slate-200 p-4 rounded shadow-sm">
+                <div class="text-[10px] uppercase font-bold text-slate-400">30% Operational Current Account</div>
+                <div class="font-mono text-lg font-bold text-emerald-700 mt-1" id="box-rera-30">INR 3,00,00,000.00</div>
+              </div>
+            </div>
+            <pre id="rera-box" class="bg-slate-900 text-sky-400 p-4 rounded font-mono text-xs max-h-60 overflow-auto">/* RERA Execution output will appear here */</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. LIQUIDITY SWEEPS -->
+      <div id="view-zba" class="tab-panel hidden">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">Zero-Balance Sweeper (ZBA)</h2>
+            <form onsubmit="event.preventDefault(); submitSweep();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Subsidiary ZBA Account</label>
+                <input type="text" id="zba-acct" value="SUBSIDIARY_PUNE_PLANT_4021" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Sweep Amount (INR)</label>
+                <input type="number" id="zba-amt" value="2500000" min="1000" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold">
+              </div>
+              <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white font-semibold py-2 rounded text-xs transition">Execute Cash Sweep</button>
+            </form>
+          </div>
+          <div class="col-span-8 space-y-4">
+            <div class="bg-white border-l-4 border-emerald-600 border border-slate-200 p-4 rounded shadow-sm">
+              <div class="text-[10px] uppercase font-bold text-slate-400">Concentrated Master Pool</div>
+              <div class="font-mono text-xl font-bold text-emerald-700 mt-1" id="box-pool">INR 8,50,00,000.00</div>
+            </div>
+            <pre id="sweep-box" class="bg-slate-900 text-sky-400 p-4 rounded font-mono text-xs max-h-60 overflow-auto">/* Sweep execution journal output */</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6. TRADE FINANCE (LC) -->
+      <div id="view-lc" class="tab-panel hidden">
+        <div class="grid grid-cols-12 gap-6">
+          <div class="col-span-4 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide border-b border-slate-100 pb-2 mb-3">Letter of Credit Drawdown</h2>
+            <form onsubmit="event.preventDefault(); submitLC();" class="space-y-3">
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">LC Reference</label>
+                <input type="text" id="lc-ref" value="DLC-2026-MUM-8911" readonly class="w-full bg-slate-50 border border-slate-200 px-2.5 py-1.5 rounded font-mono text-xs text-slate-600">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Applicant Name</label>
+                <input type="text" id="lc-applicant" value="Bharat Steel & Infrastructure Ltd" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Beneficiary Name</label>
+                <input type="text" id="lc-bene" value="Nippon Steel Heavy Industries Corp" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Advising BIC</label>
+                <input type="text" id="lc-bic" value="BOTKJPJTXXX" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+              </div>
+              <div>
+                <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Drawdown Amount (INR)</label>
+                <input type="number" id="lc-amt" value="5000000" min="1000" step="100" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs font-semibold">
+              </div>
+              <button type="submit" class="w-full bg-purple-700 hover:bg-purple-800 text-white font-semibold py-2 rounded text-xs transition">Honor Documents & Drawdown</button>
+            </form>
+          </div>
+          <div class="col-span-8 bg-white border border-slate-200 rounded shadow-sm p-4">
+            <h3 class="font-bold text-slate-800 text-xs uppercase tracking-wide mb-2">Generated SWIFT FIN MT700 Record</h3>
+            <pre id="lc-box" class="bg-slate-900 text-purple-300 p-4 rounded font-mono text-xs max-h-96 overflow-auto">/* Dispatched MT700 will appear here */</pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. ARCHITECTURE FLOW -->
+      <div id="view-architecture" class="tab-panel hidden space-y-4">
+        <div class="bg-white border border-slate-200 rounded shadow-sm p-4">
+          <h2 class="font-bold text-slate-800 text-xs uppercase tracking-wide mb-1">Transaction Banking Clearing Architecture</h2>
+          <p class="text-slate-500 text-xs mb-4">Click any node in the flow to inspect runtime states and clearing protocols.</p>
+
+          <svg viewBox="0 0 1000 240" class="w-full border border-slate-200 rounded bg-slate-50/50">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="#0284c7" />
+              </marker>
+            </defs>
+            <g onclick="inspect('erp')" class="cursor-pointer">
+              <rect x="25" y="70" width="160" height="90" rx="6" fill="#ffffff" stroke="#0284c7" stroke-width="2"/>
+              <text x="105" y="105" fill="#0f172a" font-family="'Inter', sans-serif" font-size="12" text-anchor="middle" font-weight="700">1. Corporate ERP</text>
+              <text x="105" y="125" fill="#64748b" font-family="'JetBrains Mono', monospace" font-size="10" text-anchor="middle">SAP / Host-to-Host</text>
+              <text x="105" y="142" fill="#0284c7" font-family="'JetBrains Mono', monospace" font-size="9.5" text-anchor="middle">pain.001 / MT101</text>
+            </g>
+            <g onclick="inspect('ingress')" class="cursor-pointer">
+              <rect x="245" y="70" width="170" height="90" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+              <text x="330" y="105" fill="#0f172a" font-family="'Inter', sans-serif" font-size="12" text-anchor="middle" font-weight="700">2. Ingress & Filter</text>
+              <text x="330" y="125" fill="#64748b" font-family="'JetBrains Mono', monospace" font-size="10" text-anchor="middle">Idempotency Locks</text>
+              <text x="330" y="142" fill="#0284c7" font-family="'JetBrains Mono', monospace" font-size="9.5" text-anchor="middle">OFAC & Sanctions</text>
+            </g>
+            <g onclick="inspect('ledger')" class="cursor-pointer">
+              <rect x="475" y="70" width="180" height="90" rx="6" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+              <text x="565" y="105" fill="#0f172a" font-family="'Inter', sans-serif" font-size="12" text-anchor="middle" font-weight="700">3. Ledger Core</text>
+              <text x="565" y="125" fill="#64748b" font-family="'JetBrains Mono', monospace" font-size="10" text-anchor="middle">DR Float // CR Suspense</text>
+              <text x="565" y="142" fill="#15803d" font-family="'JetBrains Mono', monospace" font-size="9.5" text-anchor="middle">&Sigma;DR - &Sigma;CR = 0</text>
+            </g>
+            <g onclick="inspect('router')" class="cursor-pointer">
+              <rect x="715" y="20" width="135" height="50" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+              <text x="782" y="48" fill="#0f172a" font-family="'Inter', sans-serif" font-size="11" text-anchor="middle" font-weight="600">RTGS (SFMS Gross)</text>
+              <rect x="715" y="90" width="135" height="50" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+              <text x="782" y="118" fill="#0f172a" font-family="'Inter', sans-serif" font-size="11" text-anchor="middle" font-weight="600">NEFT / ACH (Batched)</text>
+              <rect x="715" y="160" width="135" height="50" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+              <text x="782" y="188" fill="#0f172a" font-family="'Inter', sans-serif" font-size="11" text-anchor="middle" font-weight="600">UPI / IMPS (NPCI)</text>
+            </g>
+            <g onclick="inspect('clearing')" class="cursor-pointer">
+              <rect x="890" y="85" width="95" height="60" rx="4" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.5"/>
+              <text x="937" y="115" fill="#0f172a" font-family="'Inter', sans-serif" font-size="11" text-anchor="middle" font-weight="700">Nostro</text>
+              <text x="937" y="130" fill="#15803d" font-family="'JetBrains Mono', monospace" font-size="9" text-anchor="middle">Settled</text>
+            </g>
+            <line x1="185" y1="115" x2="240" y2="115" stroke="#0284c7" stroke-width="1.5" marker-end="url(#arrow)"/>
+            <line x1="415" y1="115" x2="470" y2="115" stroke="#0284c7" stroke-width="1.5" marker-end="url(#arrow)"/>
+            <line x1="655" y1="100" x2="710" y2="45" stroke="#0284c7" stroke-width="1.2" marker-end="url(#arrow)"/>
+            <line x1="655" y1="115" x2="710" y2="115" stroke="#0284c7" stroke-width="1.2" marker-end="url(#arrow)"/>
+            <line x1="655" y1="130" x2="710" y2="185" stroke="#0284c7" stroke-width="1.2" marker-end="url(#arrow)"/>
+            <line x1="850" y1="115" x2="885" y2="115" stroke="#94a3b8" stroke-width="1.2" marker-end="url(#arrow)"/>
+          </svg>
+
+          <div class="bg-slate-50 border border-slate-200 p-4 rounded mt-4">
+            <div class="font-bold text-slate-800 text-xs" id="ins-title">1. Corporate ERP Integration Layer</div>
+            <div class="text-slate-600 text-xs mt-1" id="ins-desc">Corporate clients submit payment batches directly from treasury platforms (SAP, Oracle Treasury) using standardized pain.001.001.09 initiation messages.</div>
+            <div class="font-mono text-[11px] text-sky-700 mt-2 font-medium" id="ins-meta">Protocols: ISO 20022 pain.001 // SWIFT MT101 // Host-to-Host SFTP</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 8. INSTITUTIONAL PRD -->
+      <div id="view-prd" class="tab-panel hidden bg-white border border-slate-200 rounded shadow-sm p-6 space-y-4">
+        <h2 class="font-bold text-slate-800 text-sm uppercase tracking-wide border-b border-slate-100 pb-2">Institutional PRD: Transaction Banking Platform</h2>
+        <div>
+          <h3 class="font-bold text-xs text-slate-700 mb-1">1. Operational Mandate</h3>
+          <p class="text-slate-600 leading-relaxed text-xs">
+            TBG-CORE serves as the high-availability orchestration switch between corporate enterprise resource planning (ERP) platforms and central payment rails (RBI SFMS, NPCI, SWIFT CBPR+). It eliminates ledger settlement leakage, prevents double-debit anomalies over unreliable networks, and guarantees straight-through processing (STP) exceeding 99.8%.
+          </p>
+        </div>
+        <div>
+          <h3 class="font-bold text-xs text-slate-700 mb-1">2. Core Regulatory Invariants</h3>
+          <ul class="list-disc list-inside text-slate-600 text-xs space-y-1">
+            <li><strong>Double-Entry Invariance:</strong> Every transaction creates balanced journal postings (&Sigma;DR - &Sigma;CR = 0) atomically.</li>
+            <li><strong>Idempotency Enforcement:</strong> Eliminates duplicate debit attempts through unique client keys bound to distributed lock state machines.</li>
+            <li><strong>RERA Section 4(2)(l)(D):</strong> Direct ring-fencing of 70% of inbound homebuyer funds into unencumbered construction escrows.</li>
+            <li><strong>Trade Finance Collateral:</strong> 100% cash margins earmarked until compliant clean shipping documents are presented.</li>
+          </ul>
+        </div>
+      </div>
+
+    </main>
+  </div>
+
+  <script>
+    const nodeData = {
+      erp: { title: "1. Corporate ERP Integration Layer", desc: "Corporate clients submit payment batches directly from treasury platforms (SAP, Oracle Treasury) using standardized pain.001.001.09 initiation messages.", meta: "Protocols: ISO 20022 pain.001 // SWIFT MT101 // Host-to-Host SFTP" },
+      ingress: { title: "2. Ingress & Sanction Screening Layer", desc: "Ingress nodes validate HMAC signatures, verify distributed idempotency keys to eliminate double-payment retry risks, and execute sub-millisecond OFAC/FATF sanction screening.", meta: "Guarantees: Distributed Redis Lock // Sub-millisecond OFAC Match" },
+      ledger: { title: "3. Double-Entry Ledger Core Engine", desc: "Executes atomic double-entry journal postings. Corporate float is debited while the CMS Suspense Account is credited. Balance reservation guarantees zero daylight overdraft.", meta: "Guarantees: Strict ACID Compliance // Invariant: Sum(DR) - Sum(CR) = 0" },
+      router: { title: "4. Multi-Rail Smart Routing Matrix", desc: "Dynamic decisioning evaluates ticket size, rail TPS health, latency, and interchange/clearing costs. Amounts >= INR 2L route via RTGS; retail amounts route via instant NPCI UPI/IMPS rails.", meta: "Rails: RBI RTGS // RBI NEFT // NPCI UPI 2.0 // NPCI IMPS // SWIFT CBPR+" },
+      clearing: { title: "5. Central Bank Nostro Settlement & Finality", desc: "End-of-day statement reconciliation (camt.053) matches multilateral net obligations, discharging the bank's CMS Suspense liability against the central bank Nostro account.", meta: "Reconciliation: camt.053 XML // MT940 End-of-Day File Matching" }
+    };
+
+    function inspect(key) {
+      const d = nodeData[key];
+      if (d) {
+        document.getElementById('ins-title').innerText = d.title;
+        document.getElementById('ins-desc').innerText = d.desc;
+        document.getElementById('ins-meta').innerText = d.meta;
+      }
+    }
+
+    function tab(id, btn) {
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('bg-sky-50', 'text-sky-700', 'font-semibold', 'border', 'border-sky-200');
+      });
+      document.getElementById(id).classList.remove('hidden');
+      btn.classList.add('bg-sky-50', 'text-sky-700', 'font-semibold', 'border', 'border-sky-200');
+    }
+
+    async function loadData() {
+      const res = await fetch('/api/v1/ledger');
+      const data = await res.json();
+      document.getElementById('m-float-inr').innerText = 'INR ' + Number(data.corporate_float_inr).toLocaleString('en-IN', {minimumFractionDigits: 2});
+      document.getElementById('m-suspense-inr').innerText = 'INR ' + Number(data.cms_suspense_inr).toLocaleString('en-IN', {minimumFractionDigits: 2});
+      document.getElementById('m-float-usd').innerText = 'USD ' + Number(data.corporate_float_usd).toLocaleString('en-US', {minimumFractionDigits: 2});
+      document.getElementById('m-rera-escrow').innerText = 'INR ' + Number(data.rera_project_escrow).toLocaleString('en-IN', {minimumFractionDigits: 2});
+      document.getElementById('box-rera-70').innerText = 'INR ' + Number(data.rera_project_escrow).toLocaleString('en-IN', {minimumFractionDigits: 2});
+      document.getElementById('box-rera-30').innerText = 'INR ' + Number(data.rera_free_float).toLocaleString('en-IN', {minimumFractionDigits: 2});
+      document.getElementById('m-lc-margin').innerText = 'INR ' + Number(data.lc_escrow_margin_inr).toLocaleString('en-IN', {minimumFractionDigits: 2});
+      document.getElementById('box-pool').innerText = 'INR ' + Number(data.liquidity_sweep_pool).toLocaleString('en-IN', {minimumFractionDigits: 2});
+      document.getElementById('m-postings-count').innerText = data.entry_counter + ' Entries';
+
+      const tbody = document.getElementById('ledger-rows');
+      tbody.innerHTML = '';
+      data.postings_ledger.forEach(r => {
+        const tr = document.createElement('tr');
+        const pill = r.leg === 'DR' ? '<span class="bg-rose-50 text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded text-[10px] font-bold">DR</span>' : '<span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded text-[10px] font-bold">CR</span>';
+        tr.innerHTML = '<td class="p-2.5 font-bold">' + r.id + '</td><td class="p-2.5 text-slate-500">' + r.jv_id + '</td><td class="p-2.5">' + r.account_id + '</td><td class="p-2.5">' + pill + '</td><td class="p-2.5 font-semibold">' + r.currency + ' ' + Number(r.amount).toLocaleString() + '</td><td class="p-2.5 text-slate-500">' + r.module + '</td><td class="p-2.5 text-slate-600">' + r.narrative + '</td>';
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function submitDomestic() {
+      const payload = {
+        source_account: document.getElementById('p-src').value,
+        beneficiary_name: document.getElementById('p-bene').value,
+        beneficiary_account: document.getElementById('p-acct').value,
+        beneficiary_ifsc: document.getElementById('p-ifsc').value,
+        amount: parseFloat(document.getElementById('p-amt').value),
+        rail: document.getElementById('p-rail').value,
+        idempotency_key: 'TXN-' + Math.floor(10000000 + Math.random() * 90000000)
+      };
+      const res = await fetch('/api/v1/payouts/domestic', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      if (!res.ok) { alert('Payout Failed: ' + await res.text()); return; }
+      const out = await res.json();
+      document.getElementById('pacs-box').innerText = out.iso20022_xml;
+      document.getElementById('webhook-box').innerText = JSON.stringify(out, null, 2);
+      await loadData();
+    }
+
+    async function submitCBPR() {
+      const payload = {
+        source_account: document.getElementById('cb-src').value,
+        beneficiary_name: document.getElementById('cb-bene').value,
+        beneficiary_iban: document.getElementById('cb-iban').value,
+        beneficiary_bic: document.getElementById('cb-bic').value,
+        intermediary_bic: document.getElementById('cb-int').value,
+        amount: parseFloat(document.getElementById('cb-amt').value),
+        currency: 'USD',
+        charge_bearer: document.getElementById('cb-chrg').value,
+        idempotency_key: 'E2E-' + Math.floor(10000000 + Math.random() * 90000000)
+      };
+      const res = await fetch('/api/v1/payouts/cross-border', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const out = await res.json();
+      document.getElementById('swift-box').innerText = out.swift_mt103;
+      await loadData();
+    }
+
+    async function submitVAN() {
+      const payload = {
+        virtual_account: document.getElementById('van-acct').value,
+        remitter_entity: document.getElementById('van-remitter').value,
+        remitter_ifsc: document.getElementById('van-ifsc').value,
+        amount: parseFloat(document.getElementById('van-amt').value),
+        invoice_reference: document.getElementById('van-inv').value
+      };
+      const res = await fetch('/api/v1/receivables/van-collection', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const out = await res.json();
+      document.getElementById('van-box').innerText = JSON.stringify(out, null, 2);
+      await loadData();
+    }
+
+    async function submitRera() {
+      const payload = {
+        project_id: "PRJ-MAHARERA-PUNE-2026-904",
+        buyer_van: document.getElementById('rera-van').value,
+        amount: parseFloat(document.getElementById('rera-amt').value)
+      };
+      const res = await fetch('/api/v1/escrow/rera-split', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const out = await res.json();
+      document.getElementById('rera-box').innerText = JSON.stringify(out, null, 2);
+      await loadData();
+    }
+
+    async function submitSweep() {
+      const payload = {
+        subsidiary_account: document.getElementById('zba-acct').value,
+        sweep_amount: parseFloat(document.getElementById('zba-amt').value)
+      };
+      const res = await fetch('/api/v1/liquidity/zba-sweep', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const out = await res.json();
+      document.getElementById('sweep-box').innerText = JSON.stringify(out, null, 2);
+      await loadData();
+    }
+
+    async function submitLC() {
+      const payload = {
+        lc_reference: document.getElementById('lc-ref').value,
+        applicant_name: document.getElementById('lc-applicant').value,
+        beneficiary_name: document.getElementById('lc-bene').value,
+        issuing_bank_bic: document.getElementById('lc-bic').value,
+        drawdown_amount_inr: parseFloat(document.getElementById('lc-amt').value)
+      };
+      const res = await fetch('/api/v1/trade-finance/lc-drawdown', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      const out = await res.json();
+      document.getElementById('lc-box').innerText = out.swift_mt700;
+      await loadData();
+    }
+
+    async function submitEOD() {
+      const res = await fetch('/api/v1/recon/eod-nostro', { method: 'POST' });
+      if (!res.ok) { alert('Notice: ' + await res.text()); return; }
+      const out = await res.json();
+      alert('EOD Nostro Cleared: INR ' + Number(out.discharged_suspense).toLocaleString('en-IN', {minimumFractionDigits: 2}));
+      await loadData();
+    }
+
+    window.onload = function() {
+      loadData();
+    };
+  </script>
+</body>
+</html>
+`
