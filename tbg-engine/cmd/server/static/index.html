@@ -42,7 +42,7 @@
       cursor: grabbing;
     }
     .draggable-node:hover {
-      box-shadow: 0 10px 25px -5px rgba(2, 132, 199, 0.2);
+      box-shadow: 0 10px 25px -5px rgba(2, 132, 199, 0.25);
     }
   </style>
 </head>
@@ -266,7 +266,7 @@
               </div>
               <div>
                 <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Intermediary BIC</label>
-                <input type="text" id="cb-int" value="CHASUS33XXX" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
+                <input type="text" id="cb-int-bic" value="CHASUS33XXX" required class="w-full border border-slate-300 px-2.5 py-1.5 rounded font-mono text-xs">
               </div>
               <div>
                 <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Amount (USD)</label>
@@ -485,65 +485,82 @@
   </div>
 
   <script>
+    // Distinct vector SVG icons for each node type
+    const vectorIcons = {
+      erp: '<svg class="w-4 h-4 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>',
+      ingress: '<svg class="w-4 h-4 text-sky-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>',
+      ledger: '<svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 6l3 1m0 0l-3 9a5.002 5.002 0 006.001 0M6 7l3 9M6 7l6-2m6 2l3-1m-3 1l-3 9a5.002 5.002 0 006.001 0M18 7l3 9m-3-9l-6-2m0-2v2m0 16V5m0 16H9m3 0h3"/></svg>',
+      router: '<svg class="w-4 h-4 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/></svg>',
+      clearing: '<svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>'
+    };
+
+    const nodeColorStyles = {
+      erp: { border: "border-indigo-300", bgBadge: "bg-indigo-50 text-indigo-700", ring: "ring-indigo-100" },
+      ingress: { border: "border-sky-300", bgBadge: "bg-sky-50 text-sky-700", ring: "ring-sky-100" },
+      ledger: { border: "border-emerald-300", bgBadge: "bg-emerald-50 text-emerald-700", ring: "ring-emerald-100" },
+      router: { border: "border-amber-300", bgBadge: "bg-amber-50 text-amber-800", ring: "ring-amber-100" },
+      clearing: { border: "border-purple-300", bgBadge: "bg-purple-50 text-purple-700", ring: "ring-purple-100" }
+    };
+
     const productFlows = {
       domestic: {
         name: "Domestic Multi-Rail Outward Clearing",
         nodes: [
-          { id: "erp", x: 40, y: 160, step: "1. Corporate ERP", sub: "SAP S/4HANA Initiation", tag: "pain.001.001", from: "Corporate Host", to: "TBG Ingress Switch", desc: "Corporate ERP initiates payment batch with EndToEndId.", rule: "ISO 20022 pain.001.001.09 schema validation", payload: '{\n  "msg_id": "pain.001-2026-90",\n  "debtor_acct": "00040310001928",\n  "amount": 250000.00,\n  "currency": "INR",\n  "clearing_rail": "AUTO"\n}' },
-          { id: "ingress", x: 260, y: 160, step: "2. Security & Ingress", sub: "HMAC & Idempotency Lock", tag: "GATEWAY", from: "TBG Ingress", to: "Ledger Core Engine", desc: "Verifies HMAC signature, locks idempotency key, screens OFAC/FATF.", rule: "Strict 1-time execution lock // Sub-ms Sanction match", payload: '{\n  "idempotency_key": "TXN-89012391",\n  "hmac_sha256": "4b68e9...9a12c",\n  "ofac_screening": "CLEARED"\n}' },
-          { id: "ledger", x: 480, y: 160, step: "3. Ledger Core", sub: "DR Float // CR Suspense", tag: "DOUBLE-ENTRY", from: "Client Operating Float", to: "CMS Clearing Suspense", desc: "Debits corporate float and credits transit suspense atomically.", rule: "Basel III Invariant: Sum(DR) - Sum(CR) = 0", payload: '[\n  { "acct": "00040310001928", "leg": "DR", "amount": 250000.00 },\n  { "acct": "AC_CMS_SUSPENSE_CLEARING_9999", "leg": "CR", "amount": 250000.00 }\n]' },
-          { id: "router", x: 700, y: 160, step: "4. Multi-Rail Router", sub: "RTGS / NEFT / UPI", tag: "DYNAMIC SWITCH", from: "CMS Suspense Account", to: "RBI / NPCI Switch", desc: "Ticket >= 2L routed to RTGS; retail routed via UPI/IMPS.", rule: "Limit Matrix: RTGS (>= 2L) // NEFT (Batch) // UPI (Instant)", payload: '{\n  "ticket_amount": 250000.00,\n  "selected_rail": "RTGS",\n  "schema_emitted": "pacs.008.001.08"\n}' },
-          { id: "clearing", x: 920, y: 160, step: "5. Central Clearing", sub: "RBI SFMS Gross Finality", tag: "NOSTRO FINALITY", from: "CMS Suspense Discharge", to: "RBI Nostro Settlement", desc: "RBI settles gross funds against bank Nostro, discharging suspense liability.", rule: "Immediate Finality // EOD camt.053 reconciliation", payload: '{\n  "clearing_house": "RESERVE BANK OF INDIA",\n  "nostro_account": "AC_RBI_NOSTRO_0001",\n  "finality": "ACHIEVED"\n}' }
+          { id: "erp", icon: "erp", x: 40, y: 160, step: "1. Corporate ERP", sub: "SAP S/4HANA Initiation", tag: "pain.001.001", from: "Corporate Host", to: "TBG Ingress Switch", desc: "Corporate ERP initiates payment batch with EndToEndId.", rule: "ISO 20022 pain.001.001.09 schema validation", payload: '{\n  "msg_id": "pain.001-2026-90",\n  "debtor_acct": "00040310001928",\n  "amount": 250000.00,\n  "currency": "INR",\n  "clearing_rail": "AUTO"\n}' },
+          { id: "ingress", icon: "ingress", x: 260, y: 160, step: "2. Security & Ingress", sub: "HMAC & Idempotency Lock", tag: "GATEWAY", from: "TBG Ingress", to: "Ledger Core Engine", desc: "Verifies HMAC signature, locks idempotency key, screens OFAC/FATF.", rule: "Strict 1-time execution lock // Sub-ms Sanction match", payload: '{\n  "idempotency_key": "TXN-89012391",\n  "hmac_sha256": "4b68e9...9a12c",\n  "ofac_screening": "CLEARED"\n}' },
+          { id: "ledger", icon: "ledger", x: 480, y: 160, step: "3. Ledger Core", sub: "DR Float // CR Suspense", tag: "DOUBLE-ENTRY", from: "Client Operating Float", to: "CMS Clearing Suspense", desc: "Debits corporate float and credits transit suspense atomically.", rule: "Basel III Invariant: Sum(DR) - Sum(CR) = 0", payload: '[\n  { "acct": "00040310001928", "leg": "DR", "amount": 250000.00 },\n  { "acct": "AC_CMS_SUSPENSE_CLEARING_9999", "leg": "CR", "amount": 250000.00 }\n]' },
+          { id: "router", icon: "router", x: 700, y: 160, step: "4. Multi-Rail Router", sub: "RTGS / NEFT / UPI", tag: "DYNAMIC SWITCH", from: "CMS Suspense Account", to: "RBI / NPCI Switch", desc: "Ticket >= 2L routed to RTGS; retail routed via UPI/IMPS.", rule: "Limit Matrix: RTGS (>= 2L) // NEFT (Batch) // UPI (Instant)", payload: '{\n  "ticket_amount": 250000.00,\n  "selected_rail": "RTGS",\n  "schema_emitted": "pacs.008.001.08"\n}' },
+          { id: "clearing", icon: "clearing", x: 920, y: 160, step: "5. Central Clearing", sub: "RBI SFMS Gross Finality", tag: "NOSTRO FINALITY", from: "CMS Suspense Discharge", to: "RBI Nostro Settlement", desc: "RBI settles gross funds against bank Nostro, discharging suspense liability.", rule: "Immediate Finality // EOD camt.053 reconciliation", payload: '{\n  "clearing_house": "RESERVE BANK OF INDIA",\n  "nostro_account": "AC_RBI_NOSTRO_0001",\n  "finality": "ACHIEVED"\n}' }
         ]
       },
       cbpr: {
         name: "Cross-Border SWIFT CBPR+ Engine",
         nodes: [
-          { id: "erp", x: 40, y: 160, step: "1. Global Treasury", sub: "USD Wire Request", tag: "pain.001 / MT101", from: "Corporate Treasury", to: "CBPR+ Gateway", desc: "Client initiates USD wire with international remittance details.", rule: "FATF Recommendation 16 compliance", payload: '{\n  "source": "CORP_US_FLOAT_0029",\n  "amount": 250000.00,\n  "currency": "USD",\n  "beneficiary": "Airbus Operations GmbH"\n}' },
-          { id: "ingress", x: 260, y: 160, step: "2. AML & UETR", sub: "UUIDv4 UETR Injection", tag: "SWIFT GPI", from: "Ingress Router", to: "USD Transit Ledger", desc: "Generates persistent 36-char UETR tracking key.", rule: "Mandatory SWIFT GPI UETR tracking", payload: '{\n  "uetr": "8f901a23-44bc-4e91-8812-90123847a1bc",\n  "screening": "OFAC_PASSED"\n}' },
-          { id: "ledger", x: 480, y: 160, step: "3. USD Nostro Hold", sub: "USD Float Reservation", tag: "DOUBLE-ENTRY", from: "Corporate USD Float", to: "USD Wire Suspense", desc: "Earmarks client USD balance before correspondent transmission.", rule: "Sum(DR) = Sum(CR) // Zero daylight exposure", payload: '[\n  { "acct": "CORP_US_FLOAT_0029", "leg": "DR", "amount": 250000.00 },\n  { "acct": "TRANSIT_OUTWARD_USD_SUSPENSE", "leg": "CR", "amount": 250000.00 }\n]' },
-          { id: "router", x: 700, y: 160, step: "4. Intermediary Routing", sub: "Chase NYC Intermediary", tag: "COVER METHOD", from: "TBG Core Switch", to: "Intermediary BIC", desc: "Formats SWIFT FIN MT103 and MT202 COV messages.", rule: "SWIFT CBPR+ pacs.008 / MT103 standards", payload: '{\n  "intermediary_bic": "CHASUS33XXX",\n  "creditor_agent_bic": "DBEUMM21XXX",\n  "charge_bearer": "OUR"\n}' },
-          { id: "clearing", x: 920, y: 160, step: "5. Overseas Finality", sub: "TARGET2 Settlement", tag: "CORRESPONDENT", from: "Chase NYC Nostro", to: "Deutsche Bank Beneficiary", desc: "Intermediary bank completes payment across TARGET2.", rule: "International finality // MT940 / camt.053 reconciliation", payload: '{\n  "settlement_rail": "CHIPS / FEDWIRE",\n  "status": "CREDITED_TO_BENEFICIARY"\n}' }
+          { id: "erp", icon: "erp", x: 40, y: 160, step: "1. Global Treasury", sub: "USD Wire Request", tag: "pain.001 / MT101", from: "Corporate Treasury", to: "CBPR+ Gateway", desc: "Client initiates USD wire with international remittance details.", rule: "FATF Recommendation 16 compliance", payload: '{\n  "source": "CORP_US_FLOAT_0029",\n  "amount": 250000.00,\n  "currency": "USD",\n  "beneficiary": "Airbus Operations GmbH"\n}' },
+          { id: "ingress", icon: "ingress", x: 260, y: 160, step: "2. AML & UETR", sub: "UUIDv4 UETR Injection", tag: "SWIFT GPI", from: "Ingress Router", to: "USD Transit Ledger", desc: "Generates persistent 36-char UETR tracking key.", rule: "Mandatory SWIFT GPI UETR tracking", payload: '{\n  "uetr": "8f901a23-44bc-4e91-8812-90123847a1bc",\n  "screening": "OFAC_PASSED"\n}' },
+          { id: "ledger", icon: "ledger", x: 480, y: 160, step: "3. USD Nostro Hold", sub: "USD Float Reservation", tag: "DOUBLE-ENTRY", from: "Corporate USD Float", to: "USD Wire Suspense", desc: "Earmarks client USD balance before correspondent transmission.", rule: "Sum(DR) = Sum(CR) // Zero daylight exposure", payload: '[\n  { "acct": "CORP_US_FLOAT_0029", "leg": "DR", "amount": 250000.00 },\n  { "acct": "TRANSIT_OUTWARD_USD_SUSPENSE", "leg": "CR", "amount": 250000.00 }\n]' },
+          { id: "router", icon: "router", x: 700, y: 160, step: "4. Intermediary Routing", sub: "Chase NYC Intermediary", tag: "COVER METHOD", from: "TBG Core Switch", to: "Intermediary BIC", desc: "Formats SWIFT FIN MT103 and MT202 COV messages.", rule: "SWIFT CBPR+ pacs.008 / MT103 standards", payload: '{\n  "intermediary_bic": "CHASUS33XXX",\n  "creditor_agent_bic": "DBEUMM21XXX",\n  "charge_bearer": "OUR"\n}' },
+          { id: "clearing", icon: "clearing", x: 920, y: 160, step: "5. Overseas Finality", sub: "TARGET2 Settlement", tag: "CORRESPONDENT", from: "Chase NYC Nostro", to: "Deutsche Bank Beneficiary", desc: "Intermediary bank completes payment across TARGET2.", rule: "International finality // MT940 / camt.053 reconciliation", payload: '{\n  "settlement_rail": "CHIPS / FEDWIRE",\n  "status": "CREDITED_TO_BENEFICIARY"\n}' }
         ]
       },
       van: {
         name: "Virtual Account (VAN) Receivables Matching",
         nodes: [
-          { id: "erp", x: 40, y: 160, step: "1. Remitter Bank", sub: "Inward NEFT/RTGS Wire", tag: "pacs.008 INWARD", from: "Remitter Bank Account", to: "Clearing House", desc: "Payer sends funds citing Virtual Account Number.", rule: "IFSC automated routing", payload: '{\n  "van": "VAN-90812-INV44",\n  "remitter": "Reliance Retail Operations",\n  "amount": 1850000.00\n}' },
-          { id: "ingress", x: 260, y: 160, step: "2. Shadow Account Parser", sub: "VAN to Pool Lookup", tag: "ROUTING GATEWAY", from: "RBI Inflow Feed", to: "TBG Entity Mapper", desc: "Maps shadow VAN to parent Corporate pool account.", rule: "1:1 Real-time invoice reconciliation", payload: '{\n  "mapped_corporate_account": "00040310001928",\n  "invoice_matched": "INV-2026-SEP-091"\n}' },
-          { id: "ledger", x: 480, y: 160, step: "3. Direct Float Credit", sub: "CR Corporate Operating Float", tag: "AUTO-POSTING", from: "Virtual Sub-Ledger", to: "Corporate Physical Pool", desc: "Automatically credits corporate operating float.", rule: "Strict Straight-Through Processing (STP > 99.8%)", payload: '[\n  { "acct": "VAN-90812-INV44", "leg": "DR", "amount": 1850000.00 },\n  { "acct": "00040310001928", "leg": "CR", "amount": 1850000.00 }\n]' },
-          { id: "router", x: 700, y: 160, step: "4. Webhook Dispatch", sub: "Real-Time ERP Notice", tag: "ERP INTEGRATION", from: "TBG Event Bus", to: "Corporate SAP ERP", desc: "Sends signed HMAC event notifying ERP invoice is settled.", rule: "Sub-second ERP notification webhook", payload: '{\n  "event": "receivable.reconciled",\n  "invoice_status": "PAID"\n}' },
-          { id: "clearing", x: 920, y: 160, step: "5. Reconciliation Finality", sub: "Ledger Cleared", tag: "CLOSED", from: "Inbound Transit", to: "Available Working Capital", desc: "Funds immediately available for working capital deployment.", rule: "Zero unallocated suspense balance", payload: '{\n  "unallocated_suspense": "INR 0.00",\n  "working_capital_augmented": true\n}' }
+          { id: "erp", icon: "erp", x: 40, y: 160, step: "1. Remitter Bank", sub: "Inward NEFT/RTGS Wire", tag: "pacs.008 INWARD", from: "Remitter Bank Account", to: "Clearing House", desc: "Payer sends funds citing Virtual Account Number.", rule: "IFSC automated routing", payload: '{\n  "van": "VAN-90812-INV44",\n  "remitter": "Reliance Retail Operations",\n  "amount": 1850000.00\n}' },
+          { id: "ingress", icon: "ingress", x: 260, y: 160, step: "2. Shadow Account Parser", sub: "VAN to Pool Lookup", tag: "ROUTING GATEWAY", from: "RBI Inflow Feed", to: "TBG Entity Mapper", desc: "Maps shadow VAN to parent Corporate pool account.", rule: "1:1 Real-time invoice reconciliation", payload: '{\n  "mapped_corporate_account": "00040310001928",\n  "invoice_matched": "INV-2026-SEP-091"\n}' },
+          { id: "ledger", icon: "ledger", x: 480, y: 160, step: "3. Direct Float Credit", sub: "CR Corporate Operating Float", tag: "AUTO-POSTING", from: "Virtual Sub-Ledger", to: "Corporate Physical Pool", desc: "Automatically credits corporate operating float.", rule: "Strict Straight-Through Processing (STP > 99.8%)", payload: '[\n  { "acct": "VAN-90812-INV44", "leg": "DR", "amount": 1850000.00 },\n  { "acct": "00040310001928", "leg": "CR", "amount": 1850000.00 }\n]' },
+          { id: "router", icon: "router", x: 700, y: 160, step: "4. Webhook Dispatch", sub: "Real-Time ERP Notice", tag: "ERP INTEGRATION", from: "TBG Event Bus", to: "Corporate SAP ERP", desc: "Sends signed HMAC event notifying ERP invoice is settled.", rule: "Sub-second ERP notification webhook", payload: '{\n  "event": "receivable.reconciled",\n  "invoice_status": "PAID"\n}' },
+          { id: "clearing", icon: "clearing", x: 920, y: 160, step: "5. Reconciliation Finality", sub: "Ledger Cleared", tag: "CLOSED", from: "Inbound Transit", to: "Available Working Capital", desc: "Funds immediately available for working capital deployment.", rule: "Zero unallocated suspense balance", payload: '{\n  "unallocated_suspense": "INR 0.00",\n  "working_capital_augmented": true\n}' }
         ]
       },
       rera: {
         name: "RERA Section 4(2)(l)(D) Dual-Escrow Split",
         nodes: [
-          { id: "erp", x: 40, y: 160, step: "1. Homebuyer Remittance", sub: "Flat Booking Payment", tag: "COLLECTION", from: "Homebuyer Account", to: "Project Collection VAN", desc: "Homebuyer transfers consideration into project virtual account.", rule: "Real Estate (Regulation and Development) Act 2016", payload: '{\n  "homebuyer_van": "VAN-PUNE-TWR-801",\n  "amount": 5000000.00,\n  "project_id": "PRJ-MAHARERA-PUNE-2026-904"\n}' },
-          { id: "ingress", x: 260, y: 160, step: "2. Statutory Split Engine", sub: "70% / 30% Partition Calculator", tag: "REGULATORY SPLIT", from: "Collection VAN", to: "Escrow Partition Controller", desc: "Calculates statutory partition: 70% construction, 30% OpEx.", rule: "RERA Section 4(2)(l)(D) statutory mandate", payload: '{\n  "gross_consideration": 5000000.00,\n  "project_escrow_70": 3500000.00,\n  "operational_float_30": 1500000.00\n}' },
-          { id: "ledger", x: 480, y: 160, step: "3. Dual-Escrow Postings", sub: "3-Leg Balanced Voucher", tag: "DOUBLE-ENTRY", from: "Collection VAN (DR)", to: "70% Escrow & 30% Float (CR)", desc: "Posts balanced 3-leg voucher separating encumbered funds.", rule: "Sum(DR) = Sum(CR) // Zero balance leakage", payload: '[\n  { "acct": "VAN-PUNE-TWR-801", "leg": "DR", "amount": 5000000.00 },\n  { "acct": "ESCROW_RERA_70_SECURED", "leg": "CR", "amount": 3500000.00 },\n  { "acct": "ESCROW_RERA_30_OPERATIONAL", "leg": "CR", "amount": 1500000.00 }\n]' },
-          { id: "router", x: 700, y: 160, step: "4. Withdrawal Guardrails", sub: "Milestone Lock", tag: "RING-FENCE", from: "Project Escrow 70%", to: "Contractor Payout", desc: "70% account locked. Outward payout requires CA & Architect certs.", rule: "Withdrawals proportional to % of project completion", payload: '{\n  "withdrawal_permission": "RESTRICTED",\n  "certifications_required": ["ARCHITECT", "ENGINEER", "CA"]\n}' },
-          { id: "clearing", x: 920, y: 160, step: "5. Operational Release", sub: "Developer OpEx Available", tag: "LIQUIDITY", from: "Operational 30%", to: "Corporate Current Acct", desc: "30% portion made available for general operating overheads.", rule: "Unrestricted operational liquidity", payload: '{\n  "developer_float_available": "INR 15,00,000.00"\n}' }
+          { id: "erp", icon: "erp", x: 40, y: 160, step: "1. Homebuyer Remittance", sub: "Flat Booking Payment", tag: "COLLECTION", from: "Homebuyer Account", to: "Project Collection VAN", desc: "Homebuyer transfers consideration into project virtual account.", rule: "Real Estate (Regulation and Development) Act 2016", payload: '{\n  "homebuyer_van": "VAN-PUNE-TWR-801",\n  "amount": 5000000.00,\n  "project_id": "PRJ-MAHARERA-PUNE-2026-904"\n}' },
+          { id: "ingress", icon: "ingress", x: 260, y: 160, step: "2. Statutory Split Engine", sub: "70% / 30% Partition Calculator", tag: "REGULATORY SPLIT", from: "Collection VAN", to: "Escrow Partition Controller", desc: "Calculates statutory partition: 70% construction, 30% OpEx.", rule: "RERA Section 4(2)(l)(D) statutory mandate", payload: '{\n  "gross_consideration": 5000000.00,\n  "project_escrow_70": 3500000.00,\n  "operational_float_30": 1500000.00\n}' },
+          { id: "ledger", icon: "ledger", x: 480, y: 160, step: "3. Dual-Escrow Postings", sub: "3-Leg Balanced Voucher", tag: "DOUBLE-ENTRY", from: "Collection VAN (DR)", to: "70% Escrow & 30% Float (CR)", desc: "Posts balanced 3-leg voucher separating encumbered funds.", rule: "Sum(DR) = Sum(CR) // Zero balance leakage", payload: '[\n  { "acct": "VAN-PUNE-TWR-801", "leg": "DR", "amount": 5000000.00 },\n  { "acct": "ESCROW_RERA_70_SECURED", "leg": "CR", "amount": 3500000.00 },\n  { "acct": "ESCROW_RERA_30_OPERATIONAL", "leg": "CR", "amount": 1500000.00 }\n]' },
+          { id: "router", icon: "router", x: 700, y: 160, step: "4. Withdrawal Guardrails", sub: "Milestone Lock", tag: "RING-FENCE", from: "Project Escrow 70%", to: "Contractor Payout", desc: "70% account locked. Outward payout requires CA & Architect certs.", rule: "Withdrawals proportional to % of project completion", payload: '{\n  "withdrawal_permission": "RESTRICTED",\n  "certifications_required": ["ARCHITECT", "ENGINEER", "CA"]\n}' },
+          { id: "clearing", icon: "clearing", x: 920, y: 160, step: "5. Operational Release", sub: "Developer OpEx Available", tag: "LIQUIDITY", from: "Operational 30%", to: "Corporate Current Acct", desc: "30% portion made available for general operating overheads.", rule: "Unrestricted operational liquidity", payload: '{\n  "developer_float_available": "INR 15,00,000.00"\n}' }
         ]
       },
       zba: {
         name: "Zero-Balance Account (ZBA) Liquidity Concentration",
         nodes: [
-          { id: "erp", x: 40, y: 160, step: "1. Subsidiary Operations", sub: "Decentralized Plant Acct", tag: "ZBA CURRENT", from: "Subsidiary Current Account", to: "Treasury Ingress", desc: "Subsidiary plant collects decentralized customer receipts.", rule: "Intraday transactional decentralized liquidity", payload: '{\n  "subsidiary_account": "SUBSIDIARY_PUNE_PLANT_4021",\n  "day_end_balance": 2500000.00\n}' },
-          { id: "ingress", x: 260, y: 160, step: "2. EOD Concentration Trigger", sub: "Cutoff Sweep Scheduler", tag: "TREASURY POOL", from: "Treasury Engine", to: "ZBA Sweeper Core", desc: "EOD cut-off executes automated cash concentration sweeps.", rule: "Zero idle balance mandate", payload: '{\n  "cutoff_time": "18:00:00 IST",\n  "target_subsidiary_balance": "INR 0.00"\n}' },
-          { id: "ledger", x: 480, y: 160, step: "3. Intercompany Journal", sub: "DR Subsidiary // CR Master Pool", tag: "SWEEP LEDGER", from: "Subsidiary Acct", to: "Master Treasury Concentration Pool", desc: "Debits subsidiary to zero; credits central master concentration pool.", rule: "Balanced internal treasury ledger posting", payload: '[\n  { "acct": "SUBSIDIARY_PUNE_PLANT_4021", "leg": "DR", "amount": 2500000.00 },\n  { "acct": "MASTER_LIQUIDITY_POOL_01", "leg": "CR", "amount": 2500000.00 }\n]' },
-          { id: "router", x: 700, y: 160, step: "4. Treasury Optimization", sub: "Overnight Reverse Repo", tag: "YIELD ENGINE", from: "Master Pooling Account", to: "Money Market Desk", desc: "Aggregated corporate balance deployed in overnight repo.", rule: "Yield maximization on idle balances", payload: '{\n  "concentrated_pool_total": "INR 8,50,00,000.00",\n  "overnight_yield": "6.50% p.a. Repo"\n}' },
-          { id: "clearing", x: 920, y: 160, step: "5. Morning Reverse Sweep", sub: "Target Balance Refill", tag: "NEXT DAY OPEN", from: "Master Pool", to: "Subsidiary ZBA", desc: "Next morning, target working capital limits replenished.", rule: "Automated two-way target balancing", payload: '{\n  "morning_refill_scheduled": true\n}' }
+          { id: "erp", icon: "erp", x: 40, y: 160, step: "1. Subsidiary Operations", sub: "Decentralized Plant Acct", tag: "ZBA CURRENT", from: "Subsidiary Current Account", to: "Treasury Ingress", desc: "Subsidiary plant collects decentralized customer receipts.", rule: "Intraday transactional decentralized liquidity", payload: '{\n  "subsidiary_account": "SUBSIDIARY_PUNE_PLANT_4021",\n  "day_end_balance": 2500000.00\n}' },
+          { id: "ingress", icon: "ingress", x: 260, y: 160, step: "2. EOD Concentration Trigger", sub: "Cutoff Sweep Scheduler", tag: "TREASURY POOL", from: "Treasury Engine", to: "ZBA Sweeper Core", desc: "EOD cut-off executes automated cash concentration sweeps.", rule: "Zero idle balance mandate", payload: '{\n  "cutoff_time": "18:00:00 IST",\n  "target_subsidiary_balance": "INR 0.00"\n}' },
+          { id: "ledger", icon: "ledger", x: 480, y: 160, step: "3. Intercompany Journal", sub: "DR Subsidiary // CR Master Pool", tag: "SWEEP LEDGER", from: "Subsidiary Acct", to: "Master Treasury Concentration Pool", desc: "Debits subsidiary to zero; credits central master concentration pool.", rule: "Balanced internal treasury ledger posting", payload: '[\n  { "acct": "SUBSIDIARY_PUNE_PLANT_4021", "leg": "DR", "amount": 250000.00 },\n  { "acct": "MASTER_LIQUIDITY_POOL_01", "leg": "CR", "amount": 2500000.00 }\n]' },
+          { id: "router", icon: "router", x: 700, y: 160, step: "4. Treasury Optimization", sub: "Overnight Reverse Repo", tag: "YIELD ENGINE", from: "Master Pooling Account", to: "Money Market Desk", desc: "Aggregated corporate balance deployed in overnight repo.", rule: "Yield maximization on idle balances", payload: '{\n  "concentrated_pool_total": "INR 8,50,00,000.00",\n  "overnight_yield": "6.50% p.a. Repo"\n}' },
+          { id: "clearing", icon: "clearing", x: 920, y: 160, step: "5. Morning Reverse Sweep", sub: "Target Balance Refill", tag: "NEXT DAY OPEN", from: "Master Pool", to: "Subsidiary ZBA", desc: "Next morning, target working capital limits replenished.", rule: "Automated two-way target balancing", payload: '{\n  "morning_refill_scheduled": true\n}' }
         ]
       },
       lc: {
         name: "Trade Finance Documentary Credit (MT700 LC Drawdown)",
         nodes: [
-          { id: "erp", x: 40, y: 160, step: "1. Buyer Application", sub: "Irrevocable LC Issuance", tag: "SWIFT MT700", from: "Buyer (Applicant)", to: "Issuing Bank", desc: "Buyer requests Letter of Credit guaranteeing exporter.", rule: "UCP 600 ICC Uniform Customs & Practice", payload: '{\n  "applicant": "Bharat Steel & Infrastructure Ltd",\n  "beneficiary": "Nippon Steel Heavy Industries Corp",\n  "lc_amount": 5000000.00\n}' },
-          { id: "ingress", x: 260, y: 160, step: "2. Margin Collateral Lock", sub: "100% Cash Margin Earmark", tag: "COLLATERAL HOLD", from: "Buyer Float", to: "LC Collateral Escrow", desc: "Bank ring-fences 100% cash margin from buyer float.", rule: "Credit risk mitigation // 100% cash-backed", payload: '{\n  "earmarked_margin_account": "LC_CASH_MARGIN_EARMARKED_8819",\n  "status": "COLLATERALIZED"\n}' },
-          { id: "ledger", x: 480, y: 160, step: "3. Document Verification", sub: "Clean Bill of Lading Audit", tag: "TRADE AUDIT", from: "Exporter Presentation", to: "Advising Bank", desc: "Exporter presents clean Bill of Lading and inspection report.", rule: "Strict documentary compliance (UCP 600)", payload: '{\n  "bill_of_lading": "CLEAN_ON_BOARD",\n  "sgs_inspection": "VERIFIED"\n}' },
-          { id: "router", x: 700, y: 160, step: "4. Settlement Honor", sub: "Release Cash Margin // Pay Exporter", tag: "DRAWDOWN SETTLED", from: "LC Collateral Margin", to: "Beneficiary Advising BIC", desc: "Margin collateral released and paid to advising bank.", rule: "Irrevocable bank payment undertaking", payload: '[\n  { "acct": "LC_CASH_MARGIN_EARMARKED_8819", "leg": "DR", "amount": 5000000.00 },\n  { "acct": "BENEFICIARY_ADVISING_PAYMENT_AC", "leg": "CR", "amount": 5000000.00 }\n]' },
-          { id: "clearing", x: 920, y: 160, step: "5. SWIFT Settlement Discharge", sub: "Telegraphic Finality", tag: "MT700 SETTLED", from: "Issuing Bank Nostro", to: "BOTKJPJTXXX (Nippon Steel)", desc: "Interbank payment finality achieved across SWIFT network.", rule: "Full legal discharge under international trade law", payload: '{\n  "swift_message": "MT700_HONORED",\n  "remaining_lc_balance": "INR 2,00,00,000.00"\n}' }
+          { id: "erp", icon: "erp", x: 40, y: 160, step: "1. Buyer Application", sub: "Irrevocable LC Issuance", tag: "SWIFT MT700", from: "Buyer (Applicant)", to: "Issuing Bank", desc: "Buyer requests Letter of Credit guaranteeing exporter.", rule: "UCP 600 ICC Uniform Customs & Practice", payload: '{\n  "applicant": "Bharat Steel & Infrastructure Ltd",\n  "beneficiary": "Nippon Steel Heavy Industries Corp",\n  "lc_amount": 5000000.00\n}' },
+          { id: "ingress", icon: "ingress", x: 260, y: 160, step: "2. Margin Collateral Lock", sub: "100% Cash Margin Earmark", tag: "COLLATERAL HOLD", from: "Buyer Float", to: "LC Collateral Escrow", desc: "Bank ring-fences 100% cash margin from buyer float.", rule: "Credit risk mitigation // 100% cash-backed", payload: '{\n  "earmarked_margin_account": "LC_CASH_MARGIN_EARMARKED_8819",\n  "status": "COLLATERALIZED"\n}' },
+          { id: "ledger", icon: "ledger", x: 480, y: 160, step: "3. Document Verification", sub: "Clean Bill of Lading Audit", tag: "TRADE AUDIT", from: "Exporter Presentation", to: "Advising Bank", desc: "Exporter presents clean Bill of Lading and inspection report.", rule: "Strict documentary compliance (UCP 600)", payload: '{\n  "bill_of_lading": "CLEAN_ON_BOARD",\n  "sgs_inspection": "VERIFIED"\n}' },
+          { id: "router", icon: "router", x: 700, y: 160, step: "4. Settlement Honor", sub: "Release Cash Margin // Pay Exporter", tag: "DRAWDOWN SETTLED", from: "LC Collateral Margin", to: "Beneficiary Advising BIC", desc: "Margin collateral released and paid to advising bank.", rule: "Irrevocable bank payment undertaking", payload: '[\n  { "acct": "LC_CASH_MARGIN_EARMARKED_8819", "leg": "DR", "amount": 5000000.00 },\n  { "acct": "BENEFICIARY_ADVISING_PAYMENT_AC", "leg": "CR", "amount": 5000000.00 }\n]' },
+          { id: "clearing", icon: "clearing", x: 920, y: 160, step: "5. SWIFT Settlement Discharge", sub: "Telegraphic Finality", tag: "MT700 SETTLED", from: "Issuing Bank Nostro", to: "BOTKJPJTXXX (Nippon Steel)", desc: "Interbank payment finality achieved across SWIFT network.", rule: "Full legal discharge under international trade law", payload: '{\n  "swift_message": "MT700_HONORED",\n  "remaining_lc_balance": "INR 2,00,00,000.00"\n}' }
         ]
       }
     };
@@ -565,7 +582,8 @@
       flow.nodes.forEach(function(node, i) {
         const div = document.createElement("div");
         div.id = "cnode-" + node.id;
-        div.className = "draggable-node w-48 bg-white border-2 border-slate-200 rounded-lg p-3 cursor-grab shadow-sm pointer-events-auto";
+        const color = nodeColorStyles[node.icon] || nodeColorStyles.ingress;
+        div.className = "draggable-node w-48 bg-white border-2 " + color.border + " rounded-lg p-3 cursor-grab shadow-sm pointer-events-auto " + color.ring;
         div.style.left = node.x + "px";
         div.style.top = node.y + "px";
 
@@ -581,7 +599,18 @@
           openInspector(node);
         };
 
-        div.innerHTML = '<div class="flex justify-between items-center mb-1"><span class="text-[9px] font-mono font-bold uppercase text-slate-400">Step ' + (i+1) + '</span><span id="pdot-' + node.id + '" class="w-2 h-2 rounded-full bg-slate-300"></span></div><div class="font-bold text-xs text-slate-800">' + node.step + '</div><div class="font-mono text-[10px] text-slate-500 mt-0.5">' + node.sub + '</div><div class="mt-2 bg-slate-50 border border-slate-100 rounded px-1.5 py-0.5 font-mono text-[9px] text-sky-700">' + node.tag + '</div>' + (i > 0 ? '<span class="absolute -left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>' : '') + (i < flow.nodes.length - 1 ? '<span class="absolute -right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>' : '');
+        const iconSvg = vectorIcons[node.icon] || vectorIcons.ingress;
+
+        div.innerHTML = '<div class="flex justify-between items-center mb-1">' +
+          '<div class="flex items-center space-x-1.5">' + iconSvg + '<span class="text-[9px] font-mono font-bold uppercase text-slate-500">Step ' + (i+1) + '</span></div>' +
+          '<span id="pdot-' + node.id + '" class="w-2 h-2 rounded-full bg-slate-300"></span>' +
+          '</div>' +
+          '<div class="font-bold text-xs text-slate-800">' + node.step + '</div>' +
+          '<div class="font-mono text-[10px] text-slate-500 mt-0.5">' + node.sub + '</div>' +
+          '<div class="mt-2 ' + color.bgBadge + ' border border-slate-100 rounded px-1.5 py-0.5 font-mono text-[9px] font-semibold">' + node.tag + '</div>' +
+          (i > 0 ? '<span class="absolute -left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>' : '') +
+          (i < flow.nodes.length - 1 ? '<span class="absolute -right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>' : '');
+        
         container.appendChild(div);
       });
 
@@ -640,16 +669,16 @@
       document.getElementById("node-drawer").classList.remove("hidden");
 
       document.querySelectorAll(".draggable-node").forEach(function(n) {
-        n.classList.remove("border-sky-500", "bg-sky-50/20");
+        n.classList.remove("ring-4", "ring-sky-200");
       });
       const el = document.getElementById("cnode-" + node.id);
-      if (el) el.classList.add("border-sky-500", "bg-sky-50/20");
+      if (el) el.classList.add("ring-4", "ring-sky-200");
     }
 
     function closeDrawer() {
       document.getElementById("node-drawer").classList.add("hidden");
       document.querySelectorAll(".draggable-node").forEach(function(n) {
-        n.classList.remove("border-sky-500", "bg-sky-50/20");
+        n.classList.remove("ring-4", "ring-sky-200");
       });
     }
 
@@ -662,7 +691,7 @@
 
       flow.nodes.forEach(function(n, i) {
         document.getElementById("pdot-" + n.id).className = "w-2 h-2 rounded-full bg-slate-300";
-        document.getElementById("cnode-" + n.id).classList.remove("border-sky-500", "bg-sky-50/20");
+        document.getElementById("cnode-" + n.id).classList.remove("ring-4", "ring-sky-200");
         const cable = document.getElementById("cable-" + i);
         if (cable) {
           cable.setAttribute("stroke", "#cbd5e1");
