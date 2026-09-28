@@ -486,46 +486,42 @@ const canvasHTML = `<!DOCTYPE html>
     }
   </script>
   <style>
-    .canvas-grid {
-      background-size: 24px 24px;
-      background-image: radial-gradient(circle, #cbd5e1 1px, transparent 1px);
+    .canvas-dot-grid {
+      background-size: 20px 20px;
+      background-image: radial-gradient(circle, #cbd5e1 1.2px, transparent 1.2px);
     }
     .flow-line {
       stroke-dasharray: 6;
-      animation: dash 1.5s linear infinite;
+      animation: dash 1.2s linear infinite;
     }
     @keyframes dash {
       to { stroke-dashoffset: -12; }
     }
-    .node-card {
+    .node-box {
       transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
-    .node-card:hover {
+    .node-box:hover {
       transform: translateY(-2px);
-      box-shadow: 0 10px 25px -5px rgba(2, 132, 199, 0.15), 0 8px 10px -6px rgba(2, 132, 199, 0.1);
+      box-shadow: 0 8px 20px -4px rgba(2, 132, 199, 0.18);
     }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-900 font-sans antialiased text-xs select-none">
 
   <!-- Header -->
-  <header class="bg-white border-b border-slate-200 px-6 py-3 flex justify-between items-center sticky top-0 z-50 shadow-sm">
+  <header class="bg-white border-b border-slate-200 px-6 py-2.5 flex justify-between items-center sticky top-0 z-50 shadow-sm">
     <div class="flex items-center space-x-3">
       <span class="font-mono font-bold text-sm tracking-tight text-slate-900">TBG CORE // TREASURY</span>
-      <span class="bg-sky-50 text-sky-700 border border-sky-200 font-mono text-[10px] font-semibold px-2 py-0.5 rounded">ORCHESTRATION WORKBENCH</span>
+      <span class="bg-sky-50 text-sky-700 border border-sky-200 font-mono text-[10px] font-semibold px-2 py-0.5 rounded">SELF-EXPLANATORY WORKBENCH</span>
     </div>
     <div class="flex items-center space-x-4">
-      <button onclick="simulateTrace()" id="btn-trace" class="bg-sky-600 hover:bg-sky-700 text-white font-semibold px-3 py-1.5 rounded flex items-center space-x-1.5 transition text-xs shadow-sm">
-        <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-        <span>Simulate Live Transaction Flow</span>
-      </button>
-      <div class="font-mono text-[11px] text-slate-500 border-l border-slate-200 pl-4">
+      <div class="font-mono text-[11px] text-slate-500">
         POSTGRESQL 16 ACID <span class="mx-1">•</span> INVARIANT: &Sigma;DR - &Sigma;CR = 0 <span class="mx-1">•</span> P99: 0.98ms
       </div>
     </div>
   </header>
 
-  <!-- Metrics Ribbon -->
+  <!-- Metrics Bar -->
   <div class="grid grid-cols-6 bg-slate-200 gap-px border-b border-slate-200">
     <div class="bg-white p-3 px-5">
       <div class="text-[10px] uppercase tracking-wider font-semibold text-slate-400 mb-0.5">Corporate Float</div>
@@ -556,12 +552,12 @@ const canvasHTML = `<!DOCTYPE html>
   <div class="grid grid-cols-12 min-h-[calc(100vh-105px)]">
     <!-- Sidebar Navigation -->
     <aside class="col-span-2 bg-white border-r border-slate-200 p-3 space-y-1">
-      <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1">Canvas & Visualizer</div>
+      <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1">Interactive Architecture</div>
       <button onclick="tab('view-canvas', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100 active bg-sky-50 text-sky-700 font-semibold border border-sky-200">
-        <span>⚡ Interactive Node Canvas</span>
+        <span>⚡ Multi-Product Flow Canvas</span>
       </button>
 
-      <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1 pt-3">Transaction Products</div>
+      <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1 pt-3">Execute Live Product</div>
       <button onclick="tab('view-payout', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">1. Domestic Multi-Rail (ISO)</button>
       <button onclick="tab('view-cbpr', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">2. SWIFT CBPR+ (MT103)</button>
       <button onclick="tab('view-van', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">3. Virtual Accounts (VAN)</button>
@@ -569,122 +565,46 @@ const canvasHTML = `<!DOCTYPE html>
       <button onclick="tab('view-zba', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">5. Liquidity Sweeps (ZBA)</button>
       <button onclick="tab('view-lc', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">6. Trade Finance (MT700 LC)</button>
       
-      <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1 pt-3">Architecture & Docs</div>
-      <button onclick="tab('view-prd', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">7. Institutional PRD</button>
+      <div class="text-[10px] font-mono font-bold uppercase text-slate-400 px-3 py-1 pt-3">Institutional Specs</div>
+      <button onclick="tab('view-prd', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">7. Detailed PRD & Rules</button>
       <button onclick="tab('view-glossary', this)" class="tab-btn w-full text-left px-3 py-2 rounded font-medium text-slate-700 hover:bg-slate-100">8. Banking Glossary</button>
     </aside>
 
     <!-- Main Workspace -->
     <main class="col-span-10 relative overflow-hidden bg-slate-100">
 
-      <!-- 1. INTERACTIVE N8N-STYLE NODE CANVAS -->
+      <!-- 1. MULTI-PRODUCT FLOW CANVAS -->
       <div id="view-canvas" class="tab-panel h-full flex flex-col">
-        <!-- Canvas Toolbar -->
-        <div class="bg-white border-b border-slate-200 px-6 py-2 flex justify-between items-center z-10 shadow-sm">
-          <div class="flex items-center space-x-2">
-            <span class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            <span class="font-mono text-xs font-semibold text-slate-700">CANVAS MODE: HIGH-VALUE WHOLESALE CLEARING PIPELINE</span>
+        <!-- Flow Control Bar -->
+        <div class="bg-white border-b border-slate-200 px-6 py-2.5 flex justify-between items-center z-10 shadow-sm">
+          <div class="flex items-center space-x-3">
+            <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Select Architecture Flow:</span>
+            <select id="canvas-product-select" onchange="switchArchitectureFlow(this.value)" class="bg-slate-50 border border-slate-300 font-mono text-xs font-semibold px-2.5 py-1 rounded outline-none text-sky-800">
+              <option value="domestic">Domestic Multi-Rail Outward (RTGS/NEFT/UPI)</option>
+              <option value="cbpr">Cross-Border SWIFT CBPR+ (MT103 / pacs.008)</option>
+              <option value="van">Receivables & Virtual Account (VAN) Matching</option>
+              <option value="rera">RERA Section 4(2)(l)(D) Escrow 70/30 Split</option>
+              <option value="zba">Liquidity Concentration (ZBA Master Sweep)</option>
+              <option value="lc">Trade Finance Letter of Credit (MT700 Drawdown)</option>
+            </select>
           </div>
-          <div class="text-xs text-slate-500">
-            Click any node to open its <strong class="text-slate-800">Inspector Drawer</strong>, view active payloads, and check regulatory policies.
-          </div>
+          <button onclick="runCanvasTrace()" id="btn-trace" class="bg-sky-600 hover:bg-sky-700 text-white font-semibold px-3 py-1 rounded flex items-center space-x-1.5 transition text-xs shadow-sm">
+            <svg class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <span>Trace Live Packet Flow</span>
+          </button>
         </div>
 
-        <!-- The Canvas Board -->
-        <div class="flex-1 relative overflow-auto canvas-grid p-10 flex items-center justify-center min-h-[620px]">
+        <!-- Self-Explanatory Dynamic Canvas -->
+        <div class="flex-1 relative overflow-auto canvas-dot-grid p-8 flex items-center justify-center min-h-[580px]">
           
           <!-- Connectors SVG Layer -->
-          <svg class="absolute inset-0 w-full h-full pointer-events-none" style="min-width: 1100px; min-height: 600px;">
-            <defs>
-              <linearGradient id="grad-active" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stop-color="#0284c7" />
-                <stop offset="100%" stop-color="#06b6d4" />
-              </linearGradient>
-            </defs>
-            <!-- ERP to Ingress -->
-            <path id="path-1" d="M 230 300 C 275 300, 275 300, 320 300" stroke="#cbd5e1" stroke-width="2.5" fill="none"/>
-            <!-- Ingress to Ledger Core -->
-            <path id="path-2" d="M 510 300 C 555 300, 555 300, 600 300" stroke="#cbd5e1" stroke-width="2.5" fill="none"/>
-            <!-- Ledger to Router -->
-            <path id="path-3" d="M 790 300 C 830 300, 830 300, 870 300" stroke="#cbd5e1" stroke-width="2.5" fill="none"/>
-            <!-- Router to Clearing -->
-            <path id="path-4" d="M 1060 300 C 1100 300, 1100 300, 1140 300" stroke="#cbd5e1" stroke-width="2.5" fill="none"/>
+          <svg id="canvas-svg" class="absolute inset-0 w-full h-full pointer-events-none" style="min-width: 1100px; min-height: 560px;">
+            <!-- Paths drawn dynamically -->
           </svg>
 
-          <!-- Nodes Container -->
-          <div class="flex items-center space-x-20 z-10" style="min-width: 1200px;">
-            
-            <!-- NODE 1: Corporate ERP -->
-            <div id="node-erp" onclick="openNodeInspector('erp')" class="node-card w-48 bg-white border-2 border-slate-200 rounded-lg p-3 cursor-pointer shadow-sm relative">
-              <div class="flex justify-between items-center mb-1.5">
-                <span class="text-[9px] font-mono font-bold uppercase text-slate-400">Trigger Layer</span>
-                <span id="dot-erp" class="w-2 h-2 rounded-full bg-slate-300"></span>
-              </div>
-              <div class="font-bold text-xs text-slate-800">1. Corporate ERP</div>
-              <div class="font-mono text-[10px] text-slate-500 mt-0.5">SAP S/4HANA / H2H</div>
-              <div class="mt-2 bg-slate-50 border border-slate-100 rounded px-1.5 py-0.5 font-mono text-[9px] text-sky-700">pain.001.001.09</div>
-              <!-- Right port -->
-              <span class="absolute -right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>
-            </div>
-
-            <!-- NODE 2: Ingress & Validation -->
-            <div id="node-ingress" onclick="openNodeInspector('ingress')" class="node-card w-48 bg-white border-2 border-slate-200 rounded-lg p-3 cursor-pointer shadow-sm relative">
-              <!-- Left port -->
-              <span class="absolute -left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>
-              <div class="flex justify-between items-center mb-1.5">
-                <span class="text-[9px] font-mono font-bold uppercase text-slate-400">Gatekeeper</span>
-                <span id="dot-ingress" class="w-2 h-2 rounded-full bg-slate-300"></span>
-              </div>
-              <div class="font-bold text-xs text-slate-800">2. Ingress & Filter</div>
-              <div class="font-mono text-[10px] text-slate-500 mt-0.5">Idempotency & OFAC</div>
-              <div class="mt-2 bg-slate-50 border border-slate-100 rounded px-1.5 py-0.5 font-mono text-[9px] text-sky-700">HMAC-SHA256 Auth</div>
-              <!-- Right port -->
-              <span class="absolute -right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>
-            </div>
-
-            <!-- NODE 3: Double-Entry Core -->
-            <div id="node-ledger" onclick="openNodeInspector('ledger')" class="node-card w-48 bg-white border-2 border-slate-200 rounded-lg p-3 cursor-pointer shadow-sm relative">
-              <!-- Left port -->
-              <span class="absolute -left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>
-              <div class="flex justify-between items-center mb-1.5">
-                <span class="text-[9px] font-mono font-bold uppercase text-emerald-600">ACID Ledger</span>
-                <span id="dot-ledger" class="w-2 h-2 rounded-full bg-slate-300"></span>
-              </div>
-              <div class="font-bold text-xs text-slate-800">3. Ledger Core</div>
-              <div class="font-mono text-[10px] text-slate-500 mt-0.5">DR Float // CR Suspense</div>
-              <div class="mt-2 bg-emerald-50 border border-emerald-100 rounded px-1.5 py-0.5 font-mono text-[9px] text-emerald-700 font-semibold">&Sigma;DR = &Sigma;CR Verified</div>
-              <!-- Right port -->
-              <span class="absolute -right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>
-            </div>
-
-            <!-- NODE 4: Multi-Rail Smart Router -->
-            <div id="node-router" onclick="openNodeInspector('router')" class="node-card w-48 bg-white border-2 border-slate-200 rounded-lg p-3 cursor-pointer shadow-sm relative">
-              <!-- Left port -->
-              <span class="absolute -left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>
-              <div class="flex justify-between items-center mb-1.5">
-                <span class="text-[9px] font-mono font-bold uppercase text-amber-600">Decision Matrix</span>
-                <span id="dot-router" class="w-2 h-2 rounded-full bg-slate-300"></span>
-              </div>
-              <div class="font-bold text-xs text-slate-800">4. Dynamic Router</div>
-              <div class="font-mono text-[10px] text-slate-500 mt-0.5">RTGS / NEFT / UPI</div>
-              <div class="mt-2 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 font-mono text-[9px] text-amber-800">MDR / SLA Optimized</div>
-              <!-- Right port -->
-              <span class="absolute -right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>
-            </div>
-
-            <!-- NODE 5: Nostro Clearing & Finality -->
-            <div id="node-clearing" onclick="openNodeInspector('clearing')" class="node-card w-48 bg-white border-2 border-slate-200 rounded-lg p-3 cursor-pointer shadow-sm relative">
-              <!-- Left port -->
-              <span class="absolute -left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>
-              <div class="flex justify-between items-center mb-1.5">
-                <span class="text-[9px] font-mono font-bold uppercase text-purple-600">Settlement Finality</span>
-                <span id="dot-clearing" class="w-2 h-2 rounded-full bg-slate-300"></span>
-              </div>
-              <div class="font-bold text-xs text-slate-800">5. Central Clearing</div>
-              <div class="font-mono text-[10px] text-slate-500 mt-0.5">RBI SFMS / SWIFT CBPR+</div>
-              <div class="mt-2 bg-purple-50 border border-purple-100 rounded px-1.5 py-0.5 font-mono text-[9px] text-purple-700">camt.053 EOD Rec</div>
-            </div>
-
+          <!-- Nodes Dynamic Container -->
+          <div id="canvas-nodes" class="flex items-center space-x-16 z-10" style="min-width: 1100px;">
+            <!-- Nodes populated dynamically by JS based on selected product -->
           </div>
         </div>
 
@@ -692,22 +612,26 @@ const canvasHTML = `<!DOCTYPE html>
         <div id="node-drawer" class="hidden absolute top-0 right-0 w-[450px] h-full bg-white border-l border-slate-200 shadow-2xl z-40 flex flex-col">
           <div class="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
             <div>
-              <span class="font-mono text-[10px] uppercase font-bold text-sky-600" id="dr-layer">LAYER DIAGNOSTICS</span>
+              <span class="font-mono text-[10px] uppercase font-bold text-sky-600" id="dr-layer">STEP DIAGNOSTICS</span>
               <h3 class="font-bold text-sm text-slate-800" id="dr-title">Node Title</h3>
             </div>
             <button onclick="closeDrawer()" class="text-slate-400 hover:text-slate-600 text-lg font-bold px-2 py-0.5 rounded">&times;</button>
           </div>
           <div class="p-5 flex-1 overflow-y-auto space-y-4">
             <div>
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Operational Description</label>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Source & Destination Flow</label>
+              <div class="bg-sky-50 border border-sky-100 p-2 rounded font-mono text-[11px] text-sky-900 font-semibold" id="dr-path"></div>
+            </div>
+            <div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Operational Role & Rule</label>
               <p class="text-xs text-slate-600 leading-relaxed" id="dr-desc"></p>
             </div>
             <div>
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Regulatory Invariant / Protocol</label>
-              <div class="bg-slate-100 border border-slate-200 p-2.5 rounded font-mono text-[11px] text-slate-700 font-semibold" id="dr-rule"></div>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Regulatory Invariant</label>
+              <div class="bg-slate-100 border border-slate-200 p-2 rounded font-mono text-[11px] text-slate-700 font-semibold" id="dr-rule"></div>
             </div>
             <div>
-              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Runtime Wire Packet / Payload</label>
+              <label class="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">State Packet / Payload</label>
               <pre class="bg-slate-900 text-sky-400 p-3 rounded font-mono text-[10.5px] max-h-56 overflow-auto" id="dr-payload"></pre>
             </div>
           </div>
@@ -1027,62 +951,194 @@ const canvasHTML = `<!DOCTYPE html>
   </div>
 
   <script>
-    const nodeDetails = {
-      erp: {
-        layer: "LAYER 1 // INITIATION",
-        title: "Corporate ERP Integration",
-        desc: "Corporate treasury systems (SAP, Oracle Treasury) transmit standardized customer credit transfers. Outward payment batches carry immutable client-generated reference keys.",
-        rule: "Protocols: ISO 20022 pain.001.001.09 // SWIFT MT101 // Host-to-Host SFTP",
-        payload: '{\n  "initiation_id": "ERP-2026-90812",\n  "debtor_account": "00040310001928",\n  "beneficiary_iban": "DE89370400440532013000",\n  "amount": 250000.00,\n  "currency": "INR",\n  "payment_method": "CREDIT_TRANSFER"\n}'
+    // Product-Specific Architectures with clear Flow Routes & Payloads
+    const productFlows = {
+      domestic: {
+        name: "Domestic Multi-Rail Outward Clearing",
+        nodes: [
+          { id: "erp", step: "1. Corporate ERP", sub: "SAP S/4HANA Initiation", tag: "pain.001.001", from: "Corporate Host", to: "TBG Ingress Switch", desc: "Corporate ERP initiates high/low-value payment batch with unique EndToEndId.", rule: "ISO 20022 pain.001.001.09 schema validation", payload: '{\n  "msg_id": "pain.001-2026-90",\n  "debtor_acct": "00040310001928",\n  "amount": 250000.00,\n  "currency": "INR",\n  "clearing_rail": "AUTO"\n}' },
+          { id: "ingress", step: "2. Security & Ingress", sub: "HMAC & Idempotency Lock", tag: "GATEWAY", from: "TBG Ingress", to: "Ledger Core Engine", desc: "Verifies HMAC signature, locks idempotency key, and executes OFAC/FATF sanctions checks.", rule: "Strict 1-time execution lock // Sub-ms Sanction match", payload: '{\n  "idempotency_key": "TXN-89012391",\n  "hmac_sha256": "4b68e9...9a12c",\n  "ofac_screening": "CLEARED"\n}' },
+          { id: "ledger", step: "3. Ledger Core", sub: "DR Float // CR Suspense", tag: "DOUBLE-ENTRY", from: "Client Operating Float", to: "CMS Clearing Suspense", desc: "Books atomic double-entry hold: debits corporate float and credits transit suspense.", rule: "Basel III Invariant: Sum(DR) - Sum(CR) = 0", payload: '[\n  { "acct": "00040310001928", "leg": "DR", "amount": 250000.00 },\n  { "acct": "AC_CMS_SUSPENSE_CLEARING_9999", "leg": "CR", "amount": 250000.00 }\n]' },
+          { id: "router", step: "4. Multi-Rail Router", sub: "RTGS / NEFT / UPI", tag: "DYNAMIC SWITCH", from: "CMS Suspense Account", to: "RBI / NPCI Switch", desc: "Evaluates ticket size: amounts >= 2L routed to RTGS; retail amounts routed via UPI/IMPS.", rule: "Limit Matrix: RTGS (>= 2L) // NEFT (Batch) // UPI (Instant)", payload: '{\n  "ticket_amount": 250000.00,\n  "selected_rail": "RTGS",\n  "schema_emitted": "pacs.008.001.08"\n}' },
+          { id: "clearing", step: "5. Central Clearing", sub: "RBI SFMS Gross Finality", tag: "NOSTRO FINALITY", from: "CMS Suspense Discharge", to: "RBI Nostro Settlement", desc: "RBI settles gross funds against bank Nostro, discharging suspense liability.", rule: "Immediate Finality // EOD camt.053 reconciliation", payload: '{\n  "clearing_house": "RESERVE BANK OF INDIA",\n  "nostro_account": "AC_RBI_NOSTRO_0001",\n  "finality": "ACHIEVED"\n}' }
+        ]
       },
-      ingress: {
-        layer: "LAYER 2 // GATEWAY SECURITY",
-        title: "Ingress & Sanctions Screening",
-        desc: "Verifies HMAC-SHA256 signatures, acquires distributed idempotency locks, and executes OFAC/FATF sanctions fuzzy matching in under 0.5 milliseconds before touching ledger storage.",
-        rule: "Security: Distributed Redis Lock // Sub-millisecond OFAC Match // Zero Duplicate Bookings",
-        payload: '{\n  "idempotency_key": "TXN-89012391",\n  "hmac_sha256": "4b68e9...9a12c",\n  "ofac_screening": "CLEARED",\n  "pep_match": "NEGATIVE",\n  "lock_status": "ACQUIRED"\n}'
+      cbpr: {
+        name: "Cross-Border SWIFT CBPR+ Engine",
+        nodes: [
+          { id: "erp", step: "1. Global Treasury", sub: "Outward USD Wire Request", tag: "pain.001 / MT101", from: "Corporate Treasury", to: "CBPR+ Gateway", desc: "Corporate client initiates USD cross-border wire instruction.", rule: "FATF Recommendation 16 compliance", payload: '{\n  "source": "CORP_US_FLOAT_0029",\n  "amount": 250000.00,\n  "currency": "USD",\n  "beneficiary": "Airbus Operations GmbH"\n}' },
+          { id: "ingress", step: "2. AML & UETR Generator", sub: "UUIDv4 UETR Injection", tag: "SWIFT GPI", from: "Ingress Router", to: "USD Transit Ledger", desc: "Generates persistent 36-char UETR tracking key and executes cross-border sanctions screening.", rule: "Mandatory SWIFT GPI UETR tracking", payload: '{\n  "uetr": "8f901a23-44bc-4e91-8812-90123847a1bc",\n  "screening": "OFAC_PASSED"\n}' },
+          { id: "ledger", step: "3. USD Nostro Hold", sub: "USD Float Reservation", tag: "DOUBLE-ENTRY", from: "Corporate USD Float", to: "USD Wire Suspense", desc: "Earmarks client USD balance, ensuring coverage before correspondent bank transmission.", rule: "Sum(DR) = Sum(CR) // Zero daylight exposure", payload: '[\n  { "acct": "CORP_US_FLOAT_0029", "leg": "DR", "amount": 250000.00 },\n  { "acct": "TRANSIT_OUTWARD_USD_SUSPENSE", "leg": "CR", "amount": 250000.00 }\n]' },
+          { id: "router", step: "4. Correspondent Routing", sub: "JPMorgan Chase NYC Intermediary", tag: "COVER METHOD", from: "TBG Core Switch", to: "Intermediary BIC", desc: "Formats SWIFT FIN MT103 and MT202 COV messages with intermediary clearing instructions.", rule: "SWIFT CBPR+ pacs.008 / MT103 standards", payload: '{\n  "intermediary_bic": "CHASUS33XXX",\n  "creditor_agent_bic": "DBEUMM21XXX",\n  "charge_bearer": "OUR"\n}' },
+          { id: "clearing", step: "5. Overseas Finality", sub: "Fedwire / TARGET2 Settlement", tag: "CORRESPONDENT", from: "Chase NYC Nostro", to: "Deutsche Bank Beneficiary", desc: "Intermediary bank completes payment across TARGET2 clearing into beneficiary account.", rule: "International finality // MT940 / camt.053 reconciliation", payload: '{\n  "settlement_rail": "CHIPS / FEDWIRE",\n  "status": "CREDITED_TO_BENEFICIARY"\n}' }
+        ]
       },
-      ledger: {
-        layer: "LAYER 3 // POSTING CORE",
-        title: "Double-Entry Balance Reservation",
-        desc: "Executes atomic double-entry postings. The corporate float is debited while the CMS Suspense Account is credited, guaranteeing zero daylight overdraft exposure.",
-        rule: "Basel III Invariant: Sum(DR) - Sum(CR) = 0 // Immediate Transit Hold",
-        payload: '[\n  {\n    "account": "AC_CMS_SUSPENSE_CLEARING_9999",\n    "leg": "CR",\n    "amount": 250000.00,\n    "status": "HOLD_RESERVED"\n  },\n  {\n    "account": "00040310001928",\n    "leg": "DR",\n    "amount": 250000.00,\n    "status": "DEBITED"\n  }\n]'
+      van: {
+        name: "Virtual Account (VAN) Receivables & Invoice Reconciliation",
+        nodes: [
+          { id: "erp", step: "1. Remitter Bank", sub: "Inward NEFT/RTGS Wire", tag: "pacs.008 INWARD", from: "Remitter Bank Account", to: "Clearing House", desc: "Payer sends funds mentioning specific Virtual Account Number (VAN) on the invoice.", rule: "Indian Financial System Code (IFSC) routing", payload: '{\n  "van": "VAN-90812-INV44",\n  "remitter": "Reliance Retail Operations",\n  "amount": 1850000.00\n}' },
+          { id: "ingress", step: "2. Shadow Account Parser", sub: "VAN to Pool Lookup", tag: "ROUTING GATEWAY", from: "RBI Inflow Feed", to: "TBG Entity Mapper", desc: "Detects shadow VAN, maps to parent Corporate pool, and identifies invoice reference.", rule: "1:1 Real-time invoice reconciliation", payload: '{\n  "mapped_corporate_account": "00040310001928",\n  "invoice_matched": "INV-2026-SEP-091"\n}' },
+          { id: "ledger", step: "3. Direct Float Credit", sub: "CR Corporate Operating Float", tag: "AUTO-POSTING", from: "Virtual Sub-Ledger", to: "Corporate Physical Pool", desc: "Automatically credits corporate operating float without manual cashier intervention.", rule: "Strict Straight-Through Processing (STP > 99.8%)", payload: '[\n  { "acct": "VAN-90812-INV44", "leg": "DR", "amount": 1850000.00 },\n  { "acct": "00040310001928", "leg": "CR", "amount": 1850000.00 }\n]' },
+          { id: "router", step: "4. Webhook Dispatch", sub: "Real-Time ERP Inflow Notice", tag: "ERP INTEGRATION", from: "TBG Event Bus", to: "Corporate SAP ERP", desc: "Sends signed HMAC event notifying ERP that invoice INV-2026-SEP-091 is paid.", rule: "Sub-second ERP notification webhook", payload: '{\n  "event": "receivable.reconciled",\n  "invoice_status": "PAID"\n}' },
+          { id: "clearing", step: "5. Reconciliation Finality", sub: "Ledger Cleared", tag: "CLOSED", from: "Inbound Transit", to: "Available Working Capital", desc: "Funds available immediately for corporate liquidity deployment or sweeps.", rule: "Zero unallocated suspense balance", payload: '{\n  "unallocated_suspense": "INR 0.00",\n  "working_capital_augmented": true\n}' }
+        ]
       },
-      router: {
-        layer: "LAYER 4 // CLEARING DECISION",
-        title: "Multi-Rail Smart Routing Matrix",
-        desc: "Evaluates ticket size, rail TPS health, latency, and interchange/clearing costs. Amounts >= INR 2,00,000 route via RTGS; retail amounts route via instant NPCI UPI/IMPS rails.",
-        rule: "Dynamic Decision: RTGS (>= 2L) // NEFT (Batch) // UPI/IMPS (Retail)",
-        payload: '{\n  "ticket_amount": 250000.00,\n  "selected_rail": "RTGS",\n  "protocol": "RBI_SFMS_GROSS",\n  "network_latency": "1.02ms",\n  "cost_per_txn": "INR 25.00"\n}'
+      rera: {
+        name: "RERA Section 4(2)(l)(D) Statutory Dual-Escrow Separation",
+        nodes: [
+          { id: "erp", step: "1. Homebuyer Remittance", sub: "Project Flat Consideration", tag: "COLLECTION", from: "Homebuyer Account", to: "Project Collection VAN", desc: "Homebuyer transfers flat booking consideration into project-specific virtual account.", rule: "Real Estate (Regulation and Development) Act 2016", payload: '{\n  "homebuyer_van": "VAN-PUNE-TWR-801",\n  "amount": 5000000.00,\n  "project_id": "PRJ-MAHARERA-PUNE-2026-904"\n}' },
+          { id: "ingress", step: "2. Statutory Split Engine", sub: "70% / 30% Partition Calculator", tag: "REGULATORY SPLIT", from: "Collection VAN", to: "Escrow Partition Controller", desc: "Calculates statutory partition: exactly 70% to site construction escrow, 30% to OpEx.", rule: "RERA Section 4(2)(l)(D) statutory mandate", payload: '{\n  "gross_consideration": 5000000.00,\n  "project_escrow_70": 3500000.00,\n  "operational_float_30": 1500000.00\n}' },
+          { id: "ledger", step: "3. Dual-Escrow Postings", sub: "3-Leg Balanced Voucher", tag: "DOUBLE-ENTRY", from: "Collection VAN (DR)", to: "70% Escrow & 30% Float (CR)", desc: "Posts balanced 3-leg journal entry separating encumbered funds from unrestricted cash.", rule: "Sum(DR) = Sum(CR) // Zero balance leakage", payload: '[\n  { "acct": "VAN-PUNE-TWR-801", "leg": "DR", "amount": 5000000.00 },\n  { "acct": "ESCROW_RERA_70_SECURED", "leg": "CR", "amount": 3500000.00 },\n  { "acct": "ESCROW_RERA_30_OPERATIONAL", "leg": "CR", "amount": 1500000.00 }\n]' },
+          { id: "router", step: "4. Withdrawal Guardrails", sub: "Milestone Certification Lock", tag: "RING-FENCE", from: "Project Escrow 70%", to: "Contractor Payout", desc: "70% account locked. Outward payout requires CA, Engineer, and Architect certificates.", rule: "Withdrawals proportional to % of project completion", payload: '{\n  "withdrawal_permission": "RESTRICTED",\n  "certifications_required": ["ARCHITECT", "ENGINEER", "CA"]\n}' },
+          { id: "clearing", step: "5. Operational Release", sub: "Unrestricted Developer OpEx", tag: "LIQUIDITY", from: "Operational 30%", to: "General Corporate Current Acct", desc: "30% portion made available immediately for general corporate overheads.", rule: "Unrestricted operational liquidity", payload: '{\n  "developer_float_available": "INR 15,00,000.00"\n}' }
+        ]
       },
-      clearing: {
-        layer: "LAYER 5 // FINALITY",
-        title: "Central Clearing & Nostro Settlement",
-        desc: "End-of-day statement reconciliation (camt.053) matches multilateral net obligations, discharging the bank CMS Suspense liability against the central bank Nostro account.",
-        rule: "Finality: Immediate in RTGS // camt.053 End-of-Day File Matching",
-        payload: '{\n  "clearing_house": "RESERVE BANK OF INDIA",\n  "nostro_account": "AC_RBI_NOSTRO_0001",\n  "settlement_status": "FINALITY_ACHIEVED",\n  "camt053_rec": "MATCHED"\n}'
+      zba: {
+        name: "Zero-Balance Account (ZBA) Liquidity Concentration",
+        nodes: [
+          { id: "erp", step: "1. Subsidiary Operations", sub: "Decentralized Plant Acct", tag: "ZBA CURRENT", from: "Subsidiary Current Account", to: "Treasury Ingress", desc: "Subsidiary plant collects sales receipts throughout the trading day.", rule: "Intraday transactional decentralized liquidity", payload: '{\n  "subsidiary_account": "SUBSIDIARY_PUNE_PLANT_4021",\n  "day_end_balance": 2500000.00\n}' },
+          { id: "ingress", step: "2. EOD Concentration Trigger", sub: "Cutoff Sweep Scheduler", tag: "TREASURY POOL", from: "Treasury Engine", to: "ZBA Sweeper Core", desc: "EOD treasury cut-off executes automated cash concentration sweeps.", rule: "Zero idle balance mandate", payload: '{\n  "cutoff_time": "18:00:00 IST",\n  "target_subsidiary_balance": "INR 0.00"\n}' },
+          { id: "ledger", step: "3. Intercompany Journal", sub: "DR Subsidiary // CR Master Pool", tag: "SWEEP LEDGER", from: "Subsidiary Acct", to: "Master Treasury Concentration Pool", desc: "Debits subsidiary to zero; credits central master concentration pool account.", rule: "Balanced internal treasury ledger posting", payload: '[\n  { "acct": "SUBSIDIARY_PUNE_PLANT_4021", "leg": "DR", "amount": 2500000.00 },\n  { "acct": "MASTER_LIQUIDITY_POOL_01", "leg": "CR", "amount": 2500000.00 }\n]' },
+          { id: "router", step: "4. Treasury Optimization", sub: "Overnight Reverse Repo", tag: "YIELD ENGINE", from: "Master Pooling Account", to: "Money Market Desk", desc: "Aggregated corporate balance deployed in overnight interbank money markets.", rule: "Yield maximization on idle balances", payload: '{\n  "concentrated_pool_total": "INR 8,50,00,000.00",\n  "overnight_yield": "6.50% p.a. Repo"\n}' },
+          { id: "clearing", step: "5. Morning Reverse Sweep", sub: "Target Balance Refill", tag: "NEXT DAY OPEN", from: "Master Pool", to: "Subsidiary ZBA", desc: "Next morning, target working capital limits are replenished automatically.", rule: "Automated two-way target balancing", payload: '{\n  "morning_refill_scheduled": true\n}' }
+        ]
+      },
+      lc: {
+        name: "Trade Finance Documentary Credit (MT700 LC Drawdown)",
+        nodes: [
+          { id: "erp", step: "1. Buyer Application", sub: "Issuance of Irrevocable LC", tag: "SWIFT MT700", from: "Buyer (Applicant)", to: "Issuing Bank", desc: "Buyer requests Letter of Credit guaranteeing exporter upon compliant presentation.", rule: "UCP 600 ICC Uniform Customs & Practice", payload: '{\n  "applicant": "Bharat Steel & Infrastructure Ltd",\n  "beneficiary": "Nippon Steel Heavy Industries Corp",\n  "lc_amount": 5000000.00\n}' },
+          { id: "ingress", step: "2. Margin Collateral Lock", sub: "100% Cash Margin Earmark", tag: "COLLATERAL HOLD", from: "Buyer Float", to: "LC Collateral Escrow", desc: "Bank ring-fences 100% cash margin from buyer float before transmitting guarantee.", rule: "Credit risk mitigation // 100% cash-backed", payload: '{\n  "earmarked_margin_account": "LC_CASH_MARGIN_EARMARKED_8819",\n  "status": "COLLATERALIZED"\n}' },
+          { id: "ledger", step: "3. Document Verification", sub: "Clean Bill of Lading & Inspection", tag: "TRADE AUDIT", from: "Exporter Presentation", to: "Advising Bank", desc: "Exporter presents clean Bill of Lading, Certificate of Origin, and SGS inspection report.", rule: "Strict documentary compliance (UCP 600)", payload: '{\n  "bill_of_lading": "CLEAN_ON_BOARD",\n  "sgs_inspection": "VERIFIED"\n}' },
+          { id: "router", step: "4. Settlement Honor", sub: "Release Cash Margin // Pay Beneficiary", tag: "DRAWDOWN SETTLED", from: "LC Collateral Margin", to: "Beneficiary Advising BIC", desc: "Margin collateral is released and credited to beneficiary's advising bank.", rule: "Irrevocable bank payment undertaking", payload: '[\n  { "acct": "LC_CASH_MARGIN_EARMARKED_8819", "leg": "DR", "amount": 5000000.00 },\n  { "acct": "BENEFICIARY_ADVISING_PAYMENT_AC", "leg": "CR", "amount": 5000000.00 }\n]' },
+          { id: "clearing", step: "5. SWIFT Settlement Discharge", sub: "Interbank Telegraphic Finality", tag: "MT700 SETTLED", from: "Issuing Bank Nostro", to: "BOTKJPJTXXX (Nippon Steel)", desc: "Interbank payment finality achieved across correspondent SWIFT rail.", rule: "Full legal discharge under international trade law", payload: '{\n  "swift_message": "MT700_HONORED",\n  "remaining_lc_balance": "INR 2,00,00,000.00"\n}' }
+        ]
       }
     };
 
-    function openNodeInspector(key) {
-      const data = nodeDetails[key];
-      if (!data) return;
-      document.getElementById('dr-layer').innerText = data.layer;
-      document.getElementById('dr-title').innerText = data.title;
-      document.getElementById('dr-desc').innerText = data.desc;
-      document.getElementById('dr-rule').innerText = data.rule;
-      document.getElementById('dr-payload').innerText = data.payload;
-      document.getElementById('node-drawer').classList.remove('hidden');
+    let currentFlowKey = "domestic";
 
-      // Highlight active node
-      document.querySelectorAll('.node-card').forEach(n => n.classList.remove('border-sky-500', 'bg-sky-50/30'));
-      document.getElementById('node-' + key).classList.add('border-sky-500', 'bg-sky-50/30');
+    function switchArchitectureFlow(key) {
+      currentFlowKey = key;
+      renderArchitectureFlow();
+    }
+
+    function renderArchitectureFlow() {
+      const flow = productFlows[currentFlowKey];
+      const container = document.getElementById("canvas-nodes");
+      const svg = document.getElementById("canvas-svg");
+      
+      container.innerHTML = "";
+      svg.innerHTML = "";
+
+      // Draw Nodes
+      flow.nodes.forEach((node, i) => {
+        const div = document.createElement("div");
+        div.id = "cnode-" + node.id;
+        div.className = "node-box w-48 bg-white border-2 border-slate-200 rounded-lg p-3 cursor-pointer shadow-sm relative";
+        div.onclick = () => openInspector(node);
+
+        div.innerHTML = `
+          <div class="flex justify-between items-center mb-1">
+            <span class="text-[9px] font-mono font-bold uppercase text-slate-400">Step ${i+1}</span>
+            <span id="pdot-${node.id}" class="w-2 h-2 rounded-full bg-slate-300"></span>
+          </div>
+          <div class="font-bold text-xs text-slate-800">${node.step}</div>
+          <div class="font-mono text-[10px] text-slate-500 mt-0.5">${node.sub}</div>
+          <div class="mt-2 bg-slate-50 border border-slate-100 rounded px-1.5 py-0.5 font-mono text-[9px] text-sky-700">${node.tag}</div>${i > 0 ? '<span class="absolute -left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>' : ''}
+          ${i < flow.nodes.length - 1 ? '<span class="absolute -right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 bg-white border-2 border-slate-400 rounded-full"></span>' : ''}
+        `;
+        container.appendChild(div);
+      });
+
+      // Draw SVG Connecting Lines
+      setTimeout(drawConnectingLines, 50);
+    }
+
+    function drawConnectingLines() {
+      const svg = document.getElementById("canvas-svg");
+      svg.innerHTML = "";
+      const flow = productFlows[currentFlowKey];
+      
+      for (let i = 0; i < flow.nodes.length - 1; i++) {
+        const n1 = document.getElementById("cnode-" + flow.nodes[i].id);
+        const n2 = document.getElementById("cnode-" + flow.nodes[i+1].id);
+        if (!n1 || !n2) continue;
+
+        const r1 = n1.getBoundingClientRect();
+        const r2 = n2.getBoundingClientRect();
+        const svgR = svg.getBoundingClientRect();
+
+        const x1 = r1.right - svgR.left;
+        const y1 = r1.top + r1.height/2 - svgR.top;
+        const x2 = r2.left - svgR.left;
+        const y2 = r2.top + r2.height/2 - svgR.top;
+
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.id = "cpath-" + i;
+        path.setAttribute("d", `M ${x1}${y1} C ${x1+40}${y1}, ${x2-40}${y2}, ${x2}${y2}`);
+        path.setAttribute("stroke", "#cbd5e1");
+        path.setAttribute("stroke-width", "2.5");
+        path.setAttribute("fill", "none");
+        svg.appendChild(path);
+      }
+    }
+
+    function openInspector(node) {
+      document.getElementById("dr-layer").innerText = node.tag;
+      document.getElementById("dr-title").innerText = node.step;
+      document.getElementById("dr-path").innerText = node.from + " ➔ " + node.to;
+      document.getElementById("dr-desc").innerText = node.desc;
+      document.getElementById("dr-rule").innerText = node.rule;
+      document.getElementById("dr-payload").innerText = node.payload;
+      document.getElementById("node-drawer").classList.remove("hidden");
+
+      document.querySelectorAll(".node-box").forEach(n => n.classList.remove("border-sky-500", "bg-sky-50/30"));
+      document.getElementById("cnode-" + node.id).classList.add("border-sky-500", "bg-sky-50/30");
     }
 
     function closeDrawer() {
-      document.getElementById('node-drawer').classList.add('hidden');
-      document.querySelectorAll('.node-card').forEach(n => n.classList.remove('border-sky-500', 'bg-sky-50/30'));
+      document.getElementById("node-drawer").classList.add("hidden");
+      document.querySelectorAll(".node-box").forEach(n => n.classList.remove("border-sky-500", "bg-sky-50/30"));
+    }
+
+    async function runCanvasTrace() {
+      const btn = document.getElementById("btn-trace");
+      btn.disabled = true;
+      btn.classList.add("opacity-50");
+
+      const flow = productFlows[currentFlowKey];
+
+      // Reset
+      flow.nodes.forEach((n, i) => {
+        document.getElementById("pdot-" + n.id).className = "w-2 h-2 rounded-full bg-slate-300";
+        document.getElementById("cnode-" + n.id).classList.remove("border-sky-500", "bg-sky-50/30");
+        const path = document.getElementById("cpath-" + i);
+        if (path) {
+          path.setAttribute("stroke", "#cbd5e1");
+          path.classList.remove("flow-line");
+        }
+      });
+
+      // Animate hop-by-hop
+      for (let i = 0; i < flow.nodes.length; i++) {
+        const node = flow.nodes[i];
+        document.getElementById("pdot-" + node.id).className = "w-2 h-2 rounded-full bg-sky-500 animate-ping";
+        openInspector(node);
+
+        if (i < flow.nodes.length - 1) {
+          const path = document.getElementById("cpath-" + i);
+          if (path) {
+            path.setAttribute("stroke", "#0284c7");
+            path.classList.add("flow-line");
+          }
+        }
+
+        await new Promise(r => setTimeout(r, 1100));
+        document.getElementById("pdot-" + node.id).className = "w-2 h-2 rounded-full bg-emerald-500";
+      }
+
+      btn.disabled = false;
+      btn.classList.remove("opacity-50");
     }
 
     function tab(id, btn) {
@@ -1092,44 +1148,7 @@ const canvasHTML = `<!DOCTYPE html>
       });
       document.getElementById(id).classList.remove('hidden');
       btn.classList.add('bg-sky-50', 'text-sky-700', 'font-semibold', 'border', 'border-sky-200');
-    }
-
-    async function simulateTrace() {
-      tab('view-canvas', document.querySelector('.tab-btn'));
-      const btn = document.getElementById('btn-trace');
-      btn.disabled = true;
-      btn.classList.add('opacity-50');
-
-      const nodes = ['erp', 'ingress', 'ledger', 'router', 'clearing'];
-      const paths = ['path-1', 'path-2', 'path-3', 'path-4'];
-
-      // Reset
-      nodes.forEach(n => {
-        document.getElementById('dot-' + n).className = 'w-2 h-2 rounded-full bg-slate-300';
-        document.getElementById('node-' + n).classList.remove('border-sky-500', 'bg-sky-50/30');
-      });
-      paths.forEach(p => {
-        document.getElementById(p).setAttribute('stroke', '#cbd5e1');
-        document.getElementById(p).classList.remove('flow-line');
-      });
-
-      for (let i = 0; i < nodes.length; i++) {
-        const node = nodes[i];
-        document.getElementById('dot-' + node).className = 'w-2 h-2 rounded-full bg-sky-500 animate-ping';
-        openNodeInspector(node);
-
-        if (i < paths.length) {
-          const path = document.getElementById(paths[i]);
-          path.setAttribute('stroke', '#0284c7');
-          path.classList.add('flow-line');
-        }
-
-        await new Promise(r => setTimeout(r, 1200));
-        document.getElementById('dot-' + node).className = 'w-2 h-2 rounded-full bg-emerald-500';
-      }
-
-      btn.disabled = false;
-      btn.classList.remove('opacity-50');
+      if (id === 'view-canvas') setTimeout(drawConnectingLines, 50);
     }
 
     async function loadData() {
@@ -1265,7 +1284,9 @@ const canvasHTML = `<!DOCTYPE html>
     }
 
     window.onload = function() {
+      renderArchitectureFlow();
       loadData();
+      window.addEventListener('resize', drawConnectingLines);
     };
   </script>
 </body>
